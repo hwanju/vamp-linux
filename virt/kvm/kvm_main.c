@@ -47,6 +47,10 @@
 #include <linux/srcu.h>
 #include <linux/hugetlb.h>
 #include <linux/slab.h>
+#ifdef CONFIG_KVM_VDI
+#include <linux/kvm_task_aware.h>
+#include <linux/kvm_ui.h>
+#endif
 
 #include <asm/processor.h>
 #include <asm/io.h>
@@ -480,6 +484,9 @@ static struct kvm *kvm_create_vm(void)
 	r = kvm_init_mmu_notifier(kvm);
 	if (r)
 		goto out_err;
+#ifdef CONFIG_KVM_VDI
+        init_guest_task_hash(kvm);
+#endif
 
 	raw_spin_lock(&kvm_lock);
 	list_add(&kvm->vm_list, &vm_list);
@@ -571,6 +578,9 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	kvm_arch_destroy_vm(kvm);
 	kvm_free_physmem(kvm);
 	cleanup_srcu_struct(&kvm->srcu);
+#ifdef CONFIG_KVM_VDI
+        destroy_guest_task_hash(kvm);
+#endif
 	kvm_arch_free_vm(kvm);
 	hardware_disable_all();
 	mmdrop(mm);
@@ -1612,6 +1622,9 @@ static int kvm_vm_ioctl_create_vcpu(struct kvm *kvm, u32 id)
 		return PTR_ERR(vcpu);
 
 	preempt_notifier_init(&vcpu->preempt_notifier, &kvm_preempt_ops);
+#ifdef CONFIG_KVM_VDI
+        init_task_aware_vcpu(vcpu);
+#endif
 
 	r = kvm_arch_vcpu_setup(vcpu);
 	if (r)
@@ -1965,6 +1978,12 @@ static long kvm_vm_ioctl(struct file *filp,
 			kvm->bsp_vcpu_id = arg;
 		mutex_unlock(&kvm->lock);
 		break;
+#endif
+#ifdef CONFIG_KVM_VDI
+        case KVM_UI_INFO:
+                r = -EFAULT;
+                r = kvm_ui_event(kvm, arg);
+                break;
 #endif
 	default:
 		r = kvm_arch_vm_ioctl(filp, ioctl, arg);
@@ -2587,6 +2606,12 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 	kvm_preempt_ops.sched_out = kvm_sched_out;
 
 	kvm_init_debug();
+#ifdef CONFIG_KVM_VDI
+        /* Though initialization failed, kvm_init() goes on with error message, 
+         * since task-aware feature is best-effort */
+        if( init_task_aware_agent() != 0 ) 
+                printk(KERN_ERR "kvm: task-aware agent initialization failed\n");
+#endif
 
 	return 0;
 
@@ -2630,5 +2655,8 @@ void kvm_exit(void)
 	free_cpumask_var(cpus_hardware_enabled);
 	__free_page(hwpoison_page);
 	__free_page(bad_page);
+#ifdef CONFIG_KVM_VDI
+        destroy_task_aware_agent();
+#endif
 }
 EXPORT_SYMBOL_GPL(kvm_exit);

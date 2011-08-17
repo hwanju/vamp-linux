@@ -72,6 +72,14 @@ config KVM_MMU_AUDIT
 	 This option adds a R/W kVM module parameter 'mmu_audit', which allows
 	 audit  KVM MMU at runtime.
 
+config KVM_VDI
+	bool "Virtual desktop scheduling for KVM"
+	depends on KVM
+	default y
+	---help---
+          Provides support for virtual desktop scheduling for KVM.
+          Basically tracking guest-side process switching for interactive multi-core scheduling.
+
 # OK, it's a little counter-intuitive to do this, but it puts it neatly under
 # the virtualization menu.
 source drivers/vhost/Kconfig

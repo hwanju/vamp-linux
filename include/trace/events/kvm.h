@@ -306,6 +306,78 @@ TRACE_EVENT(
 
 #endif
 
+#ifdef CONFIG_KVM_VDI
+TRACE_EVENT(kvm_vcpu_switch,
+	TP_PROTO(int op, int vcpu_id, unsigned int load_idx, u64 cpu_load),
+	TP_ARGS(op, vcpu_id, load_idx, cpu_load),
+
+	TP_STRUCT__entry(
+		__field(	int,		op              )
+		__field(	int,	        vcpu_id		)
+		__field(	unsigned int,   load_idx        )
+		__field(	u64,		cpu_load        )
+	),
+
+	TP_fast_assign(
+		__entry->op             = op;
+		__entry->vcpu_id        = vcpu_id;
+		__entry->load_idx       = load_idx;
+		__entry->cpu_load       = cpu_load;
+	),
+
+	TP_printk("%s v%d load_idx=%u cpu_load=%llu", __entry->op ? "arrive" : "depart", 
+                  __entry->vcpu_id, __entry->load_idx, __entry->cpu_load)
+);
+#define trace_kvm_vcpu_switch_arrive(vcpu_id, load_idx, cpu_load) \
+        trace_kvm_vcpu_switch(1, vcpu_id, load_idx, cpu_load)
+#define trace_kvm_vcpu_switch_depart(vcpu_id, load_idx, cpu_load) \
+        trace_kvm_vcpu_switch(0, vcpu_id, load_idx, cpu_load)
+TRACE_EVENT(kvm_guest_thread_switch,
+	TP_PROTO(int op, unsigned long guest_task_id, int vcpu_id, unsigned int load_idx, u64 cpu_load),
+	TP_ARGS(op, guest_task_id, vcpu_id, load_idx, cpu_load),
+
+	TP_STRUCT__entry(
+		__field(	int,		op              )
+		__field(	int,	        vcpu_id		)
+		__field(	unsigned long,  guest_task_id   )
+		__field(	unsigned int,   load_idx        )
+		__field(	u64,		cpu_load        )
+	),
+
+	TP_fast_assign(
+		__entry->op             = op;
+		__entry->vcpu_id        = vcpu_id;
+		__entry->guest_task_id  = guest_task_id;
+		__entry->load_idx       = load_idx;
+		__entry->cpu_load       = cpu_load;
+	),
+
+	TP_printk("%s gtid=%08lx v%d load_idx=%u cpu_load=%llu", __entry->op ? "arrive" : "depart", 
+                  __entry->guest_task_id, __entry->vcpu_id, __entry->load_idx, __entry->cpu_load)
+);
+#define trace_kvm_guest_thread_switch_arrive(guest_task_id, vcpu_id, load_idx, cpu_load) \
+        trace_kvm_guest_thread_switch(1, guest_task_id, vcpu_id, load_idx, cpu_load)
+#define trace_kvm_guest_thread_switch_depart(guest_task_id, vcpu_id, load_idx, cpu_load) \
+        trace_kvm_guest_thread_switch(0, guest_task_id, vcpu_id, load_idx, cpu_load)
+#endif
+
+TRACE_EVENT(kvm_ui,
+	TP_PROTO(int event_type, int event_info),
+	TP_ARGS(event_type, event_info),
+
+	TP_STRUCT__entry(
+		__field(	int,		event_type      )
+		__field(	int,	        event_info      )
+	),
+
+	TP_fast_assign(
+		__entry->event_type     = event_type;
+		__entry->event_info     = event_info;
+	),
+
+	TP_printk("type=%d info=%d", __entry->event_type, __entry->event_info)
+);
+
 #endif /* _TRACE_KVM_MAIN_H */
 
 /* This part must be outside protection */

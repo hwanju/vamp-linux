@@ -45,6 +45,9 @@
 #include <linux/uaccess.h>
 #include <linux/hash.h>
 #include <trace/events/kvm.h>
+#ifdef CONFIG_KVM_VDI
+#include <linux/kvm_task_aware.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include "trace.h"
@@ -6109,6 +6112,9 @@ void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
 	vcpu_load(vcpu);
 	kvm_mmu_unload(vcpu);
 	vcpu_put(vcpu);
+#ifdef CONFIG_KVM_VDI
+        destroy_task_aware_vcpu(vcpu);
+#endif
 
 	fx_free(vcpu);
 	kvm_x86_ops->vcpu_free(vcpu);

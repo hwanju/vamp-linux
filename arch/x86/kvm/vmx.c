@@ -29,6 +29,9 @@
 #include <linux/ftrace_event.h>
 #include <linux/slab.h>
 #include <linux/tboot.h>
+#ifdef CONFIG_KVM_VDI
+#include <linux/kvm_task_aware.h>
+#endif
 #include "kvm_cache_regs.h"
 #include "x86.h"
 
@@ -71,6 +74,14 @@ module_param(vmm_exclusive, bool, S_IRUGO);
 
 static int __read_mostly yield_on_hlt = 1;
 module_param(yield_on_hlt, bool, S_IRUGO);
+
+#ifdef CONFIG_KVM_VDI
+static int __read_mostly track_cr3_load = 1;
+module_param(track_cr3_load, bool, S_IRUGO | S_IWUSR);
+
+/* If this value is 1, it starts to track CR3 load in spite of ept */
+static int __read_mostly track_cr3_on_ept;
+#endif
 
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
 	(X86_CR0_WP | X86_CR0_NE | X86_CR0_NW | X86_CR0_CD)
@@ -1620,6 +1631,9 @@ static __init int setup_vmcs_config(struct vmcs_config *vmcs_conf)
 		rdmsr(MSR_IA32_VMX_EPT_VPID_CAP,
 		      vmx_capability.ept, vmx_capability.vpid);
 	}
+#ifdef CONFIG_KVM_VDI
+        track_cr3_on_ept = 0;
+#endif
 
 	min = 0;
 #ifdef CONFIG_X86_64
@@ -2055,14 +2069,28 @@ static void ept_update_paging_mode_cr0(unsigned long *hw_cr0,
 			     vmcs_read32(CPU_BASED_VM_EXEC_CONTROL) |
 			     (CPU_BASED_CR3_LOAD_EXITING |
 			      CPU_BASED_CR3_STORE_EXITING));
+#ifdef CONFIG_KVM_VDI
+                track_cr3_on_ept = 0;
+#endif
 		vcpu->arch.cr0 = cr0;
 		vmx_set_cr4(vcpu, kvm_read_cr4(vcpu));
 	} else if (!is_paging(vcpu)) {
 		/* From nonpaging to paging */
+#ifdef CONFIG_KVM_VDI
+                track_cr3_on_ept = 0;
+                if (track_cr3_load) {   /* skip the disable of VM_EXIT for CR3 load */ 
+                        vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,
+                                        vmcs_read32(CPU_BASED_VM_EXEC_CONTROL) &
+                                        ~CPU_BASED_CR3_STORE_EXITING);
+                        track_cr3_on_ept = 1;
+                }
+                else     /* if track_cr3_load is disabled, run the following line */
+#endif
 		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,
 			     vmcs_read32(CPU_BASED_VM_EXEC_CONTROL) &
 			     ~(CPU_BASED_CR3_LOAD_EXITING |
 			       CPU_BASED_CR3_STORE_EXITING));
+                
 		vcpu->arch.cr0 = cr0;
 		vmx_set_cr4(vcpu, kvm_read_cr4(vcpu));
 	}
@@ -3376,6 +3404,15 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 			kvm_complete_insn_gp(vcpu, err);
 			return 1;
 		case 3:
+#ifdef CONFIG_KVM_VDI
+                        track_guest_task(vcpu, val >> PAGE_SHIFT);
+                        if (track_cr3_on_ept) { 
+	                        vmx_flush_tlb(vcpu);    /* FIXME: can it be optimized? */
+                                vmcs_writel(GUEST_CR3, val);
+		                skip_emulated_instruction(vcpu);
+                                return 1;
+                        }
+#endif
 			err = kvm_set_cr3(vcpu, val);
 			kvm_complete_insn_gp(vcpu, err);
 			return 1;

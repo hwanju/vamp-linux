@@ -683,6 +683,15 @@ struct kvm_clock_data {
 /* Available with KVM_CAP_TSC_CONTROL */
 #define KVM_SET_TSC_KHZ           _IO(KVMIO,  0xa2)
 #define KVM_GET_TSC_KHZ           _IO(KVMIO,  0xa3)
+#ifdef CONFIG_KVM_VDI
+#define KVM_UI_INFO               _IOW(KVMIO, 0xef, __u32)
+enum {
+        kvm_kbd_pressed,
+        kvm_kbd_released,
+        kvm_mouse_pressed,
+        kvm_mouse_released,
+};
+#endif
 
 /*
  * ioctls for vcpu fds

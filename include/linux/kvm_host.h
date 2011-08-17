@@ -50,6 +50,11 @@
 
 #define KVM_USERSPACE_IRQ_SOURCE_ID	0
 
+#ifdef CONFIG_KVM_VDI   /* FIXME: new config replaces this, since the following depends on task-aware agent */
+#define LOAD_ENTRIES_SHIFT              3       /* TODO: changed into module parameter */ 
+#define NR_LOAD_ENTRIES                 (1<<LOAD_ENTRIES_SHIFT)   
+#endif
+
 struct kvm;
 struct kvm_vcpu;
 extern struct kmem_cache *kvm_vcpu_cache;
@@ -148,6 +153,21 @@ struct kvm_vcpu {
 		struct list_head done;
 		spinlock_t lock;
 	} async_pf;
+#endif
+
+#ifdef CONFIG_KVM_VDI
+        /* caching the currently running guest task */
+        struct guest_task_struct *cur_guest_task;
+#ifdef CONFIG_PREEMPT_NOTIFIERS
+        /* always called on vcpu preemption for accounting */
+	struct preempt_notifier acct_preempt_notifier;
+#endif
+        u64 last_depart;        /* last vcpu depart time */
+        u64 last_arrival;       /* last vcpu arrival time */
+        u64 load_epoch_id;      /* inidicating the current load_epoch_id */
+        /* preserving the past cpu loads as well as the current one
+           indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
+        u64 cpu_loads[NR_LOAD_ENTRIES];
 #endif
 
 	struct kvm_vcpu_arch arch;
@@ -276,6 +296,14 @@ struct kvm {
 	long mmu_notifier_count;
 #endif
 	long tlbs_dirty;
+#ifdef CONFIG_KVM_VDI
+        /* For task-aware agent */ 
+#define GUEST_TASK_HASH_SHIFT   10
+#define GUEST_TASK_HASH_HEADS   (1 << GUEST_TASK_HASH_SHIFT)
+        struct hlist_head guest_task_hash[GUEST_TASK_HASH_HEADS];
+        spinlock_t guest_task_lock;
+        /* For ui agent */
+#endif
 };
 
 /* The guest did something we don't support. */
