@@ -302,7 +302,9 @@ struct kvm {
 #define GUEST_TASK_HASH_HEADS   (1 << GUEST_TASK_HASH_SHIFT)
         struct hlist_head guest_task_hash[GUEST_TASK_HASH_HEADS];
         spinlock_t guest_task_lock;
-        /* For ui agent */
+        struct timer_list load_timer;
+        u64 load_timer_start_time;
+        pid_t vm_id;    /* for tracing (non-mandatory) */
 #endif
 };
 

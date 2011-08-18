@@ -485,7 +485,7 @@ static struct kvm *kvm_create_vm(void)
 	if (r)
 		goto out_err;
 #ifdef CONFIG_KVM_VDI
-        init_guest_task_hash(kvm);
+        init_kvm_load_monitor(kvm);
 #endif
 
 	raw_spin_lock(&kvm_lock);
@@ -579,7 +579,7 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	kvm_free_physmem(kvm);
 	cleanup_srcu_struct(&kvm->srcu);
 #ifdef CONFIG_KVM_VDI
-        destroy_guest_task_hash(kvm);
+        exit_kvm_load_monitor(kvm);
 #endif
 	kvm_arch_free_vm(kvm);
 	hardware_disable_all();

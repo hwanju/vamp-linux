@@ -16,7 +16,8 @@
  */
 extern unsigned int load_period_shift;
 #define load_idx(epoch_id)              (unsigned int)(epoch_id & (NR_LOAD_ENTRIES-1))
-#define load_epoch_id(time_in_ns)       ((time_in_ns/ NSEC_PER_MSEC) >> load_period_shift)    /* TODO: find a convert function */
+#define load_epoch_id(time_in_ns)       ((time_in_ns / NSEC_PER_MSEC) >> load_period_shift)    /* TODO: find a convert function */
+#define load_idx_by_time(time_in_ns)    (load_idx(load_epoch_id(time_in_ns)))
 
 struct guest_thread_info {
         volatile long state;            /* 0 = not running, 1 = running */
@@ -37,11 +38,12 @@ struct guest_task_struct {
         struct guest_thread_info threads[MAX_GUEST_TASK_VCPU];
 };
 
-void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id);
-void init_guest_task_hash(struct kvm *kvm);
-void destroy_guest_task_hash(struct kvm *kvm);
+void init_kvm_load_monitor(struct kvm *kvm);
+void exit_kvm_load_monitor(struct kvm *kvm);
+void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int duration_in_msec);
 void init_task_aware_vcpu(struct kvm_vcpu *vcpu);
 void destroy_task_aware_vcpu(struct kvm_vcpu *vcpu);
 int init_task_aware_agent(void);
 void destroy_task_aware_agent(void);
+void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id);
 #endif

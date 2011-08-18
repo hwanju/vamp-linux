@@ -4,6 +4,7 @@
 #include <linux/hash.h>
 #include <trace/events/kvm.h>
 #include <linux/kvm_task_aware.h>
+#include <linux/timer.h>
 
 /* FIXME: mb must be required? */
 #define set_guest_thread_state(guest_thread, state_value)     \
@@ -20,14 +21,17 @@
 /*
  * check_load_epoch() updates load_epoch_id and initializes cpu_loads[new_epoch_id],
  * when new load epoch begins at arrival time (entity would be vcpu or guest_thread).
+ * NOTE: when cpu is idle, this check period could be larger than epoch period.
+ *       So, cpu_loads that are not checked in the past have to be initialized! (See inner do-while loop)
  */
 #define check_load_epoch(entity, now)   \
         do {    \
                 unsigned long long cur_load_epoch_id = load_epoch_id(now);      \
-                if (unlikely(cur_load_epoch_id != entity->load_epoch_id)) {     \
-                        entity->load_epoch_id = cur_load_epoch_id;              \
-                        entity->cpu_loads[load_idx(cur_load_epoch_id)] = 0;     \
-                        tadebug("\t-> epoch_id=%llu, idx=%u\n", cur_load_epoch_id, load_idx(cur_load_epoch_id));       \
+                if (unlikely(entity->load_epoch_id < cur_load_epoch_id)) {     \
+                        do { \
+                                entity->load_epoch_id++;        \
+                                entity->cpu_loads[load_idx(entity->load_epoch_id)] = 0;     \
+                        } while(entity->load_epoch_id < cur_load_epoch_id);     \
                 }       \
         } while(0)
 
@@ -36,6 +40,9 @@
                 entity->cpu_loads[load_idx(entity->load_epoch_id)] += exec_time;        \
                 tadebug("\t-> cpu_loads[%u]=%llu\n", load_idx(entity->load_epoch_id), entity->cpu_loads[load_idx(entity->load_epoch_id)]);       \
         } while(0)
+
+#define valid_load_entity(kvm, entity)  \
+        (entity->load_epoch_id >= load_epoch_id(kvm->load_timer_start_time))
 
 static struct kmem_cache *guest_task_cache;
 static __read_mostly struct preempt_ops acct_preempt_ops;
@@ -72,7 +79,7 @@ static inline struct guest_task_struct *__find_guest_task(struct kvm *kvm,
         hlist_for_each_entry(iter_guest_task, node, bucket, link) {
                 if (iter_guest_task->id == guest_task_id) {  /* found */
                         guest_task = iter_guest_task;
-                        //tadebug("  %s: gtid=%08lx found\n", __func__, guest_task_id);
+                        tadebug("  %s: gtid=%08lx found\n", __func__, guest_task_id);
                         break;
                 }
         }
@@ -110,7 +117,7 @@ static inline struct guest_task_struct *find_and_alloc_guest_task(struct kvm *kv
                 guest_task = alloc_guest_task();
                 if (guest_task) 
                         __insert_to_guest_task_hash(kvm, guest_task, guest_task_id);
-                //tadebug("  %s: gtid=%08lx (guest_task=%p) allocated\n", __func__, guest_task_id, guest_task);
+                tadebug("  %s: gtid=%08lx (guest_task=%p) allocated\n", __func__, guest_task_id, guest_task);
         }
         spin_unlock(&kvm->guest_task_lock);
         return guest_task;
@@ -141,6 +148,7 @@ static inline void init_load_monitor(void)
                         break;
         }
         load_period_shift = i;
+        load_period_msec  = (1 << i);
         printk(KERN_INFO "kvm-ta: load period=%u ms (shift=%u)\n",
                         1 << load_period_shift, load_period_shift);
 }
@@ -150,10 +158,9 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
         guest_thread->cpu = vcpu->cpu;
         guest_thread->last_arrival = now;
         check_load_epoch(guest_thread, now);
-        trace_kvm_guest_thread_switch_arrive(get_cur_guest_task_id(vcpu), 
+        trace_kvm_gthread_switch_arrive(get_cur_guest_task_id(vcpu), 
                         vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
                         guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)]);
-        tadebug("    %s: v%d now=%llu\n", __func__, vcpu->vcpu_id, now);
         set_guest_thread_state(guest_thread, GUEST_THREAD_RUNNING);
 }
 
@@ -162,11 +169,10 @@ static inline void guest_thread_depart(struct kvm_vcpu *vcpu, struct guest_threa
         long long delta;
         if (likely(guest_thread->last_arrival)) {
                 delta = now - guest_thread->last_arrival;
-                tadebug("     %s: v%d now=%llu delta=%llu \n", __func__, vcpu->vcpu_id, now, delta);
                 account_cpu_load(guest_thread, now, delta);
         }
         guest_thread->last_depart = now;
-        trace_kvm_guest_thread_switch_depart(get_cur_guest_task_id(vcpu), 
+        trace_kvm_gthread_switch_depart(get_cur_guest_task_id(vcpu), 
                         vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
                         guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)]);
 
@@ -184,7 +190,6 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
         struct guest_thread_info *prev, *next;
         unsigned long long now;
 
-        tadebug("%s: pid=%d vcpu_id=%d gtid=%08lx\n", __func__, current->pid, vcpu->vcpu_id, guest_task_id);
         guest_task = find_and_alloc_guest_task(kvm, guest_task_id);
         if (!guest_task) {      /* not exist */
                 printk(KERN_ERR "kvm-ta: error - guest_task_struct find & alloc failed!\n");
@@ -219,8 +224,6 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
         struct guest_thread_info *cur_guest_thread;
         unsigned long long now = sched_clock();
 
-        tadebug("%s: pid=%d, v%d, cur gtid=%08lx\n", __func__, 
-                        current->pid, vcpu->vcpu_id, vcpu->cur_guest_task ? vcpu->cur_guest_task->id : 0);
         /* recording for arrival */ 
         vcpu->last_arrival = now;
         check_load_epoch(vcpu, now);
@@ -243,8 +246,6 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
         unsigned long long now = sched_clock();
         long long delta;
 
-        tadebug("%s: pid=%d, v%d, cur gtid=%08lx\n", __func__, 
-                        current->pid, vcpu->vcpu_id, vcpu->cur_guest_task ? vcpu->cur_guest_task->id : 0);
         /* accounting for cpu time for vcpu and its current thread */ 
         if (likely(vcpu->last_arrival)) {
                 delta = now - vcpu->last_arrival;
@@ -279,25 +280,84 @@ void destroy_task_aware_vcpu(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(destroy_task_aware_vcpu);
 
+static void load_timer_handler(unsigned long data)
+{
+        struct kvm *kvm = (struct kvm *)data;
+        struct kvm_vcpu *vcpu;
+        int i, vidx, bidx;
+        unsigned long long now = sched_clock();
+        BUG_ON(!kvm);
+
+        trace_kvm_load_check_entry(kvm->vm_id, load_period_msec, NR_LOAD_ENTRIES, kvm->load_timer_start_time, now);
+
+        /* check vcpu load history */
+        kvm_for_each_vcpu(vidx, vcpu, kvm) {
+                /* we are interested in vcpus that have been scheduled since load timer started */
+                if (!valid_load_entity(kvm, vcpu))
+                        continue;
+                for (i = 0; i < NR_LOAD_ENTRIES; i++) 
+                        trace_kvm_vcpu_load(kvm->vm_id, vcpu->vcpu_id, 
+                                        load_idx(vcpu->load_epoch_id), i, vcpu->cpu_loads[i]);
+        }
+
+        /* check guest task load history */
+        spin_lock(&kvm->guest_task_lock);
+        for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
+                struct guest_task_struct *iter_guest_task;
+                struct hlist_node *node;
+                hlist_for_each_entry(iter_guest_task, node, &kvm->guest_task_hash[bidx], link) {
+                        int vcpu_id;
+                        for (vcpu_id = 0; vcpu_id < MAX_GUEST_TASK_VCPU; vcpu_id++) {
+                                struct guest_thread_info *guest_thread = &iter_guest_task->threads[vcpu_id];
+                                /* we are interested in threads that have been scheduled since load timer started */
+                                if (!valid_load_entity(kvm, guest_thread))
+                                        continue;
+                                for (i = 0; i < NR_LOAD_ENTRIES; i++) 
+                                        trace_kvm_gthread_load(kvm->vm_id,
+                                                        iter_guest_task->id, vcpu_id, 
+                                                        load_idx(guest_thread->load_epoch_id), 
+                                                        i, guest_thread->cpu_loads[i]);
+                        }
+                }
+        }
+        spin_unlock(&kvm->guest_task_lock);
+
+        trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
+}
+
+void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int duration_in_msec)
+{
+        kvm->load_timer_start_time = now;
+        mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(duration_in_msec));
+}
+EXPORT_SYMBOL_GPL(start_load_monitor);
+
 /*
  * Each VM maintains a hash table to store guest_task_struct for every task tracked.
  * called from kvm_create_vm().
  */
-void init_guest_task_hash(struct kvm *kvm)
+void init_kvm_load_monitor(struct kvm *kvm)
 {
         int i;
         for (i = 0; i < GUEST_TASK_HASH_HEADS; i++)
                 INIT_HLIST_HEAD(&kvm->guest_task_hash[i]);
         spin_lock_init(&kvm->guest_task_lock);
         printk(KERN_INFO "kvm-ta: guest task hash initialized\n" );
+
+        init_timer(&kvm->load_timer);
+        kvm->load_timer.function = load_timer_handler;
+        kvm->load_timer.data     = (unsigned long)kvm;
+
+        /* for tracing purpose (caller must be QEMU that hosts this VM */
+        kvm->vm_id = current->pid;
 }
-EXPORT_SYMBOL_GPL(init_guest_task_hash);
+EXPORT_SYMBOL_GPL(init_kvm_load_monitor);
 
 /*
  * Destroy guest task hash when a VM is destroyed.
  * called from kvm_destroy_vm().
  */
-void destroy_guest_task_hash(struct kvm *kvm)
+void exit_kvm_load_monitor(struct kvm *kvm)
 {
         int i;
         struct hlist_node *node, *tmp;
@@ -312,8 +372,10 @@ void destroy_guest_task_hash(struct kvm *kvm)
         }
         spin_unlock(&kvm->guest_task_lock);
         printk(KERN_INFO "kvm-ta: guest task hash freed\n" );
+
+        del_timer_sync(&kvm->load_timer);
 }
-EXPORT_SYMBOL_GPL(destroy_guest_task_hash);
+EXPORT_SYMBOL_GPL(exit_kvm_load_monitor);
 
 /*
  * System-wide initialization for task-aware agent (called from kvm_init()).
