@@ -288,7 +288,7 @@ static void load_timer_handler(unsigned long data)
         unsigned long long now = sched_clock();
         BUG_ON(!kvm);
 
-        trace_kvm_load_check_entry(kvm->vm_id, load_period_msec, NR_LOAD_ENTRIES, kvm->load_timer_start_time, now);
+        trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, load_period_msec, kvm->load_timer_start_time, now);
 
         /* check vcpu load history */
         kvm_for_each_vcpu(vidx, vcpu, kvm) {
