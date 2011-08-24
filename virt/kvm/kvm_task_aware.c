@@ -10,7 +10,7 @@
 #define set_guest_thread_state(guest_thread, state_value)     \
         set_mb(guest_thread->state, (state_value))
 
-//#define KVM_TA_DEBUG
+#define KVM_TA_DEBUG
 
 #ifdef KVM_TA_DEBUG
 #define tadebug(args...) printk(KERN_DEBUG "kvm-ta debug: " args)
@@ -24,22 +24,64 @@
  * NOTE: when cpu is idle, this check period could be larger than epoch period.
  *       So, cpu_loads that are not checked in the past have to be initialized! (See inner do-while loop)
  */
-#define check_load_epoch(entity, now)   \
-        do {    \
-                unsigned long long cur_load_epoch_id = load_epoch_id(now);      \
-                if (unlikely(entity->load_epoch_id < cur_load_epoch_id)) {     \
-                        do { \
-                                entity->load_epoch_id++;        \
-                                entity->cpu_loads[load_idx(entity->load_epoch_id)] = 0;     \
-                        } while(entity->load_epoch_id < cur_load_epoch_id);     \
-                }       \
-        } while(0)
+static inline void check_load_epoch(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, 
+                                    unsigned long long now)
+{
+        unsigned long long cur_load_epoch_id = load_epoch_id(now);
+        if (guest_thread->load_epoch_id < cur_load_epoch_id) {
+                do {
+                        guest_thread->load_epoch_id++;
+                        guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)] = 0;
+                } while(guest_thread->load_epoch_id < cur_load_epoch_id);
+        }
+        if (unlikely(vcpu->load_epoch_id < cur_load_epoch_id)) {
+                do {
+                        vcpu->load_epoch_id++;
+                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)] = 0;
+                } while(vcpu->load_epoch_id < cur_load_epoch_id);
+        }
+        /* At this time, invariant is vcpu->load_epoch_id == guest_thread->load_epoch_id == cur_load_epoch_id */
+}
 
-#define account_cpu_load(entity, now, exec_time) \
-        do {    \
-                entity->cpu_loads[load_idx(entity->load_epoch_id)] += exec_time;        \
-                tadebug("\t-> cpu_loads[%u]=%llu\n", load_idx(entity->load_epoch_id), entity->cpu_loads[load_idx(entity->load_epoch_id)]);       \
-        } while(0)
+/*
+ * account_cpu_load() accounts cpu time for a guest thread and its vcpu as well when the guest thread is
+ * about to depart. Because the execution could span multiple epochs, this must correctly each part of
+ * execution time to a corresponding epoch.
+ */
+static inline void account_cpu_load(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, 
+                                    unsigned long long exec_time, unsigned long long now)
+{
+        unsigned long long i;
+        unsigned long long cur_load_epoch_id = load_epoch_id(now);
+        
+        for (i = guest_thread->load_epoch_id; i < cur_load_epoch_id; i++) {
+                unsigned long long account_time = LOAD_EPOCH_TIME_IN_NSEC;
+                unsigned int idx = load_idx(i);
+
+                if (i == guest_thread->load_epoch_id) {         /* arrival epoch */
+                        account_time -= load_epoch_offset(guest_thread->last_arrival);
+
+                        guest_thread->cpu_loads[idx] += account_time;
+                        vcpu->cpu_loads[idx] += account_time;
+                }
+                else {
+                        guest_thread->cpu_loads[idx] = account_time;
+                        vcpu->cpu_loads[idx] = account_time;
+                }
+                exec_time -= account_time;
+        }
+        if (guest_thread->load_epoch_id < cur_load_epoch_id) {  /* current epoch is new, then initialize loads */
+                guest_thread->cpu_loads[load_idx(cur_load_epoch_id)] = 0;
+                vcpu->cpu_loads[load_idx(cur_load_epoch_id)] = 0;
+        }
+        /* remaining exec time is accounted */
+        guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)] += exec_time;
+        vcpu->cpu_loads[load_idx(guest_thread->load_epoch_id)] += exec_time;
+
+        guest_thread->load_epoch_id = cur_load_epoch_id;
+        vcpu->load_epoch_id = cur_load_epoch_id;
+        /* At this time, invariant is vcpu->load_epoch_id == guest_thread->load_epoch_id == cur_load_epoch_id */
+}
 
 #define valid_load_entity(kvm, entity)  \
         (entity->load_epoch_id >= load_epoch_id(kvm->load_timer_start_time))
@@ -79,7 +121,7 @@ static inline struct guest_task_struct *__find_guest_task(struct kvm *kvm,
         hlist_for_each_entry(iter_guest_task, node, bucket, link) {
                 if (iter_guest_task->id == guest_task_id) {  /* found */
                         guest_task = iter_guest_task;
-                        tadebug("  %s: gtid=%08lx found\n", __func__, guest_task_id);
+                        //tadebug("  %s: gtid=%08lx found\n", __func__, guest_task_id);
                         break;
                 }
         }
@@ -117,7 +159,7 @@ static inline struct guest_task_struct *find_and_alloc_guest_task(struct kvm *kv
                 guest_task = alloc_guest_task();
                 if (guest_task) 
                         __insert_to_guest_task_hash(kvm, guest_task, guest_task_id);
-                tadebug("  %s: gtid=%08lx (guest_task=%p) allocated\n", __func__, guest_task_id, guest_task);
+                //tadebug("  %s: gtid=%08lx (guest_task=%p) allocated\n", __func__, guest_task_id, guest_task);
         }
         spin_unlock(&kvm->guest_task_lock);
         return guest_task;
@@ -148,16 +190,16 @@ static inline void init_load_monitor(void)
                         break;
         }
         load_period_shift = i;
-        load_period_msec  = (1 << i);
+        load_period_msec  = LOAD_EPOCH_TIME_IN_MSEC;
         printk(KERN_INFO "kvm-ta: load period=%u ms (shift=%u)\n",
-                        1 << load_period_shift, load_period_shift);
+                        LOAD_EPOCH_TIME_IN_MSEC, load_period_shift);
 }
 
 static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, unsigned long long now)
 {
         guest_thread->cpu = vcpu->cpu;
         guest_thread->last_arrival = now;
-        check_load_epoch(guest_thread, now);
+        check_load_epoch(vcpu, guest_thread, now);
         trace_kvm_gthread_switch_arrive(get_cur_guest_task_id(vcpu), 
                         vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
                         guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)]);
@@ -166,10 +208,10 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
 
 static inline void guest_thread_depart(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, unsigned long long now)
 {
-        long long delta;
+        long long exec_time;
         if (likely(guest_thread->last_arrival)) {
-                delta = now - guest_thread->last_arrival;
-                account_cpu_load(guest_thread, now, delta);
+                exec_time = now - guest_thread->last_arrival;
+                account_cpu_load(vcpu, guest_thread, exec_time, now);
         }
         guest_thread->last_depart = now;
         trace_kvm_gthread_switch_depart(get_cur_guest_task_id(vcpu), 
@@ -226,14 +268,12 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 
         /* recording for arrival */ 
         vcpu->last_arrival = now;
-        check_load_epoch(vcpu, now);
-        trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
-                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)]);
-        
         cur_guest_thread = get_cur_guest_thread(vcpu);
         if (unlikely(!cur_guest_thread))
                 return;
         guest_thread_arrive(vcpu, cur_guest_thread, now);
+        trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
+                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)]);
 }
 
 /*
@@ -244,21 +284,14 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
 	struct kvm_vcpu *vcpu = acct_preempt_notifier_to_vcpu(pn);
         struct guest_thread_info *cur_guest_thread;
         unsigned long long now = sched_clock();
-        long long delta;
 
-        /* accounting for cpu time for vcpu and its current thread */ 
-        if (likely(vcpu->last_arrival)) {
-                delta = now - vcpu->last_arrival;
-                account_cpu_load(vcpu, now, delta);
-        }
         vcpu->last_depart = now;
-        trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
-                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)]);
-
         cur_guest_thread = get_cur_guest_thread(vcpu);
         if (unlikely(!cur_guest_thread))
                 return;
         guest_thread_depart(vcpu, cur_guest_thread, now);
+        trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
+                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)]);
 }
 
 /*
