@@ -22,6 +22,11 @@ extern unsigned int load_period_shift;
 #define load_idx_by_time(time_in_ns)    (load_idx(load_epoch_id(time_in_ns)))
 #define load_epoch_offset(time_in_ns)   (time_in_ns % LOAD_EPOCH_TIME_IN_NSEC)
 
+/* VLP related */
+#define VCPU_BLOCKED    0
+#define VCPU_WAITING    1 
+#define VCPU_RUNNING    2
+
 struct guest_thread_info {
         volatile long state;            /* 0 = not running, 1 = running */
         int cpu;                        /* physical cpu id hosting this vcpu */

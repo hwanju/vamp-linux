@@ -51,7 +51,7 @@
 #define KVM_USERSPACE_IRQ_SOURCE_ID	0
 
 #ifdef CONFIG_KVM_VDI   /* FIXME: new config replaces this, since the following depends on task-aware agent */
-#define LOAD_ENTRIES_SHIFT              3       /* TODO: changed into module parameter */ 
+#define LOAD_ENTRIES_SHIFT              4       /* TODO: changed into module parameter */ 
 #define NR_LOAD_ENTRIES                 (1<<LOAD_ENTRIES_SHIFT)   
 #endif
 
@@ -168,6 +168,12 @@ struct kvm_vcpu {
         /* preserving the past cpu loads as well as the current one
            indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
         u64 cpu_loads[NR_LOAD_ENTRIES];
+
+        /* VLP */
+        volatile long state;
+
+        /* vcpu placement */
+        cpumask_t cpus_to_run;
 #endif
 
 	struct kvm_vcpu_arch arch;
@@ -304,6 +310,14 @@ struct kvm {
         spinlock_t guest_task_lock;
         struct timer_list load_timer;
         u64 load_timer_start_time;
+        /* VLP: VCPU-level Parallelism */
+        int vlp;                /* current vlp */
+        u64 vlp_avg;            /* sum of (vlp * period) during vlp measure period */
+        u64 vlp_period;         /* sum of periods where vlp > 0 (non-idle period) */
+        u64 vlp_timestamp;      /* timestamp at which vlp was changed */
+        cpumask_t vlp_vcpus;    /* vcpus for which vlp is accounted */
+        spinlock_t vlp_lock;
+
         pid_t vm_id;    /* for tracing (non-mandatory) */
 #endif
 };

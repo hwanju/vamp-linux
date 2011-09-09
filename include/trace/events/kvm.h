@@ -308,14 +308,15 @@ TRACE_EVENT(
 
 #ifdef CONFIG_KVM_VDI
 TRACE_EVENT(kvm_vcpu_switch,
-	TP_PROTO(int op, int vcpu_id, unsigned int load_idx, u64 cpu_load),
-	TP_ARGS(op, vcpu_id, load_idx, cpu_load),
+	TP_PROTO(int op, int vcpu_id, unsigned int load_idx, u64 cpu_load, int state),
+	TP_ARGS(op, vcpu_id, load_idx, cpu_load, state),
 
 	TP_STRUCT__entry(
 		__field(	int,		op              )
 		__field(	int,	        vcpu_id		)
 		__field(	unsigned int,   load_idx        )
 		__field(	u64,		cpu_load        )
+		__field(	int,	        state           )
 	),
 
 	TP_fast_assign(
@@ -323,15 +324,16 @@ TRACE_EVENT(kvm_vcpu_switch,
 		__entry->vcpu_id        = vcpu_id;
 		__entry->load_idx       = load_idx;
 		__entry->cpu_load       = cpu_load;
+		__entry->state          = state;
 	),
 
-	TP_printk("%s v%d load_idx=%u cpu_load=%llu", __entry->op ? "arrive" : "depart", 
-                  __entry->vcpu_id, __entry->load_idx, __entry->cpu_load)
+	TP_printk("%s v%d load_idx=%u cpu_load=%llu state=%d", __entry->op ? "arrive" : "depart", 
+                  __entry->vcpu_id, __entry->load_idx, __entry->cpu_load, __entry->state)
 );
-#define trace_kvm_vcpu_switch_arrive(vcpu_id, load_idx, cpu_load) \
-        trace_kvm_vcpu_switch(1, vcpu_id, load_idx, cpu_load)
-#define trace_kvm_vcpu_switch_depart(vcpu_id, load_idx, cpu_load) \
-        trace_kvm_vcpu_switch(0, vcpu_id, load_idx, cpu_load)
+#define trace_kvm_vcpu_switch_arrive(vcpu_id, load_idx, cpu_load, state) \
+        trace_kvm_vcpu_switch(1, vcpu_id, load_idx, cpu_load, state)
+#define trace_kvm_vcpu_switch_depart(vcpu_id, load_idx, cpu_load, state) \
+        trace_kvm_vcpu_switch(0, vcpu_id, load_idx, cpu_load, state)
 TRACE_EVENT(kvm_gthread_switch,
 	TP_PROTO(int op, unsigned long guest_task_id, int vcpu_id, unsigned int load_idx, u64 cpu_load),
 	TP_ARGS(op, guest_task_id, vcpu_id, load_idx, cpu_load),
@@ -458,6 +460,46 @@ TRACE_EVENT(kvm_gthread_load,
 
 	TP_printk("vm%d v%d gtid=%lx cur_load_idx=%u load_idx=%u cpu_load=%llu", __entry->vm_id, __entry->vcpu_id, 
                         __entry->guest_task_id, __entry->cur_load_idx, __entry->load_idx, __entry->cpu_load)
+);
+
+TRACE_EVENT(kvm_vlp,
+	TP_PROTO(int vm_id, int vlp, u64 vlp_avg, u64 vlp_period),
+	TP_ARGS(vm_id, vlp, vlp_avg, vlp_period),
+
+	TP_STRUCT__entry(
+		__field(	int,		vm_id           )
+		__field(	int,	        vlp             )
+		__field(	u64,	        vlp_avg         )
+		__field(	u64,	        vlp_period      )
+	),
+
+	TP_fast_assign(
+		__entry->vm_id          = vm_id;
+		__entry->vlp            = vlp;
+		__entry->vlp_avg        = vlp_avg;
+		__entry->vlp_period     = vlp_period;
+	),
+	TP_printk("vm%d vlp=%d avg=%llu period=%llu", __entry->vm_id, 
+                __entry->vlp, __entry->vlp_avg, __entry->vlp_period)
+);
+
+TRACE_EVENT(kvm_vlp_avg,
+	TP_PROTO(int vm_id, u64 vlp_avg, u64 vlp_period),
+	TP_ARGS(vm_id, vlp_avg, vlp_period),
+
+	TP_STRUCT__entry(
+		__field(	int,		vm_id           )
+		__field(	u64,	        vlp_avg         )
+		__field(	u64,	        vlp_period      )
+	),
+
+	TP_fast_assign(
+		__entry->vm_id          = vm_id;
+		__entry->vlp_avg        = vlp_avg;
+		__entry->vlp_period     = vlp_period;
+	),
+	TP_printk("vm%d avg=%llu period=%llu", __entry->vm_id, 
+                __entry->vlp_avg, __entry->vlp_period)
 );
 
 #endif /* _TRACE_KVM_MAIN_H */

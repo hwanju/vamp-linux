@@ -10,6 +10,9 @@
 #define set_guest_thread_state(guest_thread, state_value)     \
         set_mb(guest_thread->state, (state_value))
 
+#define set_vcpu_state(vcpu, state_value)     \
+        set_mb(vcpu->state, (state_value))
+
 #define KVM_TA_DEBUG
 
 #ifdef KVM_TA_DEBUG
@@ -89,7 +92,7 @@ static inline void account_cpu_load(struct kvm_vcpu *vcpu, struct guest_thread_i
 static struct kmem_cache *guest_task_cache;
 static __read_mostly struct preempt_ops acct_preempt_ops;
 
-#define DEFAULT_LOAD_PERIOD_MSEC        64      /* default load period */
+#define DEFAULT_LOAD_PERIOD_MSEC        32      /* default load period */
 #define MAX_LOAD_PERIOD_SHIFT           10      /* maximum load period = 2^10 msec (about 1sec) */
 static unsigned int __read_mostly load_period_msec = DEFAULT_LOAD_PERIOD_MSEC;
 module_param(load_period_msec, uint, S_IRUGO);    /* TODO: to be updatable */
@@ -257,12 +260,34 @@ static inline struct kvm_vcpu *acct_preempt_notifier_to_vcpu(struct preempt_noti
 	return container_of(pn, struct kvm_vcpu, acct_preempt_notifier);
 }
 
+static void account_vlp(struct kvm *kvm, unsigned long long now, int inc)
+{
+        u64 period = now - kvm->vlp_timestamp;
+        
+        /* account vlp only when vlp > 0 to exclude idle period */
+        if (kvm->vlp > 0) {
+                kvm->vlp_avg += (kvm->vlp * period);
+                kvm->vlp_period += period;
+        }
+
+        /* adjust vlp */
+        if (inc)
+                kvm->vlp++;
+        else if (likely(kvm->vlp > 0)) 
+                kvm->vlp--;
+
+        kvm->vlp_timestamp = now;
+
+        trace_kvm_vlp(kvm->vm_id, kvm->vlp, kvm->vlp_avg, kvm->vlp_period);
+}
+
 /*
  * always called when a vcpu arrives unlike kvm_preempt_notifer
  */
 static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 {
 	struct kvm_vcpu *vcpu = acct_preempt_notifier_to_vcpu(pn);
+        struct kvm *kvm = vcpu->kvm;
         struct guest_thread_info *cur_guest_thread;
         unsigned long long now = sched_clock();
 
@@ -272,8 +297,22 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
         if (unlikely(!cur_guest_thread))
                 return;
         guest_thread_arrive(vcpu, cur_guest_thread, now);
+
         trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
-                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)]);
+                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
+
+        /* vlp measure: check if this vcpu has been blocked */
+        spin_lock(&kvm->vlp_lock);
+        if (vcpu->state == VCPU_BLOCKED)
+                account_vlp(kvm, now, 1);
+        set_vcpu_state(vcpu, VCPU_RUNNING);
+        spin_unlock(&kvm->vlp_lock);
+
+        /* vcpu migration if necessary */
+        //if (cpus_addr(vcpu->cpus_to_run)) {
+        //        set_cpus_allowed_ptr(current, &vcpu->cpus_to_run);
+        //        cpumask_clear(&vcpu->cpus_to_run);
+        //}
 }
 
 /*
@@ -282,6 +321,7 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
 {
 	struct kvm_vcpu *vcpu = acct_preempt_notifier_to_vcpu(pn);
+        struct kvm *kvm = vcpu->kvm;
         struct guest_thread_info *cur_guest_thread;
         unsigned long long now = sched_clock();
 
@@ -290,8 +330,19 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
         if (unlikely(!cur_guest_thread))
                 return;
         guest_thread_depart(vcpu, cur_guest_thread, now);
+
         trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
-                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)]);
+                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
+
+        /* vlp measure: check if this vcpu will be blocked*/
+        spin_lock(&kvm->vlp_lock);
+        if (likely(vcpu->state == VCPU_RUNNING) && !current->se.on_rq) {       /* to be blocked */
+                account_vlp(kvm, now, 0);
+                set_vcpu_state(vcpu, VCPU_BLOCKED);
+        }
+        else    /* to wait */
+                set_vcpu_state(vcpu, VCPU_WAITING);
+        spin_unlock(&kvm->vlp_lock);
 }
 
 /*
@@ -320,6 +371,10 @@ static void load_timer_handler(unsigned long data)
         int i, vidx, bidx;
         unsigned long long now = sched_clock();
         BUG_ON(!kvm);
+
+        spin_lock(&kvm->vlp_lock);
+        trace_kvm_vlp_avg(kvm->vm_id, kvm->vlp_avg, kvm->vlp_period);
+        spin_unlock(&kvm->vlp_lock);
 
         trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, load_period_msec, kvm->load_timer_start_time, now);
 
@@ -355,11 +410,28 @@ static void load_timer_handler(unsigned long data)
         }
         spin_unlock(&kvm->guest_task_lock);
 
+        /* make a decision of vcpu placement policy */
+        kvm_for_each_vcpu(vidx, vcpu, kvm) {
+                /* Test code */
+                cpu_set(0, vcpu->cpus_to_run);
+        }
+
         trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
+}
+
+static void start_vlp_monitor(struct kvm *kvm, unsigned long long now)
+{
+        spin_lock(&kvm->vlp_lock);
+        kvm->vlp_avg = 0;
+        kvm->vlp_period = 0;
+        kvm->vlp_timestamp = now;
+        spin_unlock(&kvm->vlp_lock);
 }
 
 void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int duration_in_msec)
 {
+        start_vlp_monitor(kvm, now);
+
         kvm->load_timer_start_time = now;
         mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(duration_in_msec));
 }
@@ -372,14 +444,19 @@ EXPORT_SYMBOL_GPL(start_load_monitor);
 void init_kvm_load_monitor(struct kvm *kvm)
 {
         int i;
+        /* guest task hash */
         for (i = 0; i < GUEST_TASK_HASH_HEADS; i++)
                 INIT_HLIST_HEAD(&kvm->guest_task_hash[i]);
         spin_lock_init(&kvm->guest_task_lock);
         printk(KERN_INFO "kvm-ta: guest task hash initialized\n" );
 
+        /* load monitor */
         init_timer(&kvm->load_timer);
         kvm->load_timer.function = load_timer_handler;
         kvm->load_timer.data     = (unsigned long)kvm;
+
+        /* VLP */
+        spin_lock_init(&kvm->vlp_lock);
 
         /* for tracing purpose (caller must be QEMU that hosts this VM */
         kvm->vm_id = current->pid;
@@ -407,6 +484,7 @@ void exit_kvm_load_monitor(struct kvm *kvm)
         printk(KERN_INFO "kvm-ta: guest task hash freed\n" );
 
         del_timer_sync(&kvm->load_timer);
+        spin_unlock_wait(&kvm->vlp_lock);
 }
 EXPORT_SYMBOL_GPL(exit_kvm_load_monitor);
 
