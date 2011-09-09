@@ -77,9 +77,9 @@ static inline void account_cpu_load(struct kvm_vcpu *vcpu, struct guest_thread_i
                 guest_thread->cpu_loads[load_idx(cur_load_epoch_id)] = 0;
                 vcpu->cpu_loads[load_idx(cur_load_epoch_id)] = 0;
         }
-        /* remaining exec time is accounted */
-        guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)] += exec_time;
-        vcpu->cpu_loads[load_idx(guest_thread->load_epoch_id)] += exec_time;
+        /* remaining exec time is accounted to the current load epoch */
+        guest_thread->cpu_loads[load_idx(cur_load_epoch_id)] += exec_time;
+        vcpu->cpu_loads[load_idx(cur_load_epoch_id)] += exec_time;
 
         guest_thread->load_epoch_id = cur_load_epoch_id;
         vcpu->load_epoch_id = cur_load_epoch_id;
