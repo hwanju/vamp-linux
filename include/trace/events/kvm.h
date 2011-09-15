@@ -412,6 +412,25 @@ TRACE_EVENT(kvm_load_check,
 #define trace_kvm_load_check_exit(vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)     \
         trace_kvm_load_check(0, vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)
 
+TRACE_EVENT(kvm_vcpu_run_delay,
+	TP_PROTO(int vm_id, int vcpu_id, u64 run_delay),
+	TP_ARGS(vm_id, vcpu_id, run_delay),
+
+	TP_STRUCT__entry(
+		__field(	int,            vm_id           )
+		__field(	int,            vcpu_id         )
+		__field(	u64,	        run_delay       )
+	),
+
+	TP_fast_assign(
+                __entry->vm_id          = vm_id;
+                __entry->vcpu_id        = vcpu_id;
+		__entry->run_delay      = run_delay;
+	),
+
+	TP_printk("vm%d v%d run_delay=%llu", __entry->vm_id, __entry->vcpu_id, __entry->run_delay)
+);
+
 TRACE_EVENT(kvm_vcpu_load,
 	TP_PROTO(int vm_id, int vcpu_id, unsigned int cur_load_idx, unsigned int load_idx, u64 cpu_load),
 	TP_ARGS(vm_id, vcpu_id, cur_load_idx, load_idx, cpu_load),

@@ -204,12 +204,13 @@ static void load_timer_handler(unsigned long data)
         struct kvm_vcpu *vcpu;
         int i, vidx, bidx;
         unsigned long long now = sched_clock();
+        unsigned long long run_delay;
         unsigned int start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
                 load_idx(load_epoch_id(now) + 1) : load_idx_by_time(kvm->monitor_timestamp);
 
         BUG_ON(!kvm);
 
-#if 0
+#if 0   /* VLP disabled */
         spin_lock(&kvm->vlp_lock);
         trace_kvm_vlp_avg(kvm->vm_id, kvm->vlp_avg, kvm->vlp_period);
         spin_unlock(&kvm->vlp_lock);
@@ -222,13 +223,18 @@ static void load_timer_handler(unsigned long data)
 
         /* check vcpu load history */
         kvm_for_each_vcpu(vidx, vcpu, kvm) {
+                run_delay = vcpu->prev_run_delay;
+                vcpu->prev_run_delay = vcpu->run_delay;
+
                 /* we are interested in vcpus that have been scheduled since load timer started */
                 if (!valid_load_entity(kvm, vcpu))
                         continue;
-                ////for (i = 0; i < NR_LOAD_ENTRIES; i++) 
+
                 for_each_load_entry(i, start_load_idx, load_idx_by_time(now))
                         trace_kvm_vcpu_load(kvm->vm_id, vcpu->vcpu_id, 
                                         load_idx(vcpu->load_epoch_id), i, vcpu->cpu_loads[i]);
+                run_delay = vcpu->run_delay - run_delay;
+                trace_kvm_vcpu_run_delay(kvm->vm_id, vcpu->vcpu_id, run_delay);
         }
 
         /* check guest task load history */
@@ -243,7 +249,6 @@ static void load_timer_handler(unsigned long data)
                                 /* we are interested in threads that have been scheduled since load timer started */
                                 if (!valid_load_entity(kvm, guest_thread))
                                         continue;
-                                ////for (i = 0; i < NR_LOAD_ENTRIES; i++) 
                                 for_each_load_entry(i, start_load_idx, load_idx_by_time(now))
                                         trace_kvm_gthread_load(kvm->vm_id,
                                                         iter_guest_task->id, vcpu_id, 
@@ -372,7 +377,7 @@ static void account_vlp(struct kvm *kvm, unsigned long long now, int inc)
 static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 {
 	struct kvm_vcpu *vcpu = acct_preempt_notifier_to_vcpu(pn);
-#if 0
+#if 0   /* VLP disabled */
         struct kvm *kvm = vcpu->kvm;
 #endif
         struct guest_thread_info *cur_guest_thread;
@@ -388,7 +393,11 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
         trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
                         vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
 
-#if 0
+        if (vcpu->state == VCPU_WAITING)
+                vcpu->run_delay += (now - vcpu->last_depart);
+        set_vcpu_state(vcpu, VCPU_RUNNING);
+
+#if 0   /* VLP disabled */
         /* vlp measure: check if this vcpu has been blocked */
         spin_lock(&kvm->vlp_lock);
         if (vcpu->state == VCPU_BLOCKED)
@@ -412,7 +421,7 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
 {
 	struct kvm_vcpu *vcpu = acct_preempt_notifier_to_vcpu(pn);
-#if 0
+#if 0   /* VLP disabled */
         struct kvm *kvm = vcpu->kvm;
 #endif
         struct guest_thread_info *cur_guest_thread;
@@ -427,7 +436,12 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
         trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
                         vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
 
-#if 0
+        if (likely(vcpu->state == VCPU_RUNNING) && !current->se.on_rq)  /* to be blocked */
+                set_vcpu_state(vcpu, VCPU_BLOCKED);
+        else    /* to wait */
+                set_vcpu_state(vcpu, VCPU_WAITING);
+
+#if 0   /* VLP disabled */
         /* vlp measure: check if this vcpu will be blocked*/
         spin_lock(&kvm->vlp_lock);
         if (likely(vcpu->state == VCPU_RUNNING) && !current->se.on_rq) {       /* to be blocked */
@@ -461,11 +475,16 @@ EXPORT_SYMBOL_GPL(destroy_task_aware_vcpu);
 
 void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int duration_in_msec)
 {
-#if 0
+#if 0   /* VLP disabled */
         start_vlp_monitor(kvm, now);
 #endif
         
         if (!timer_pending(&kvm->load_timer)) {
+                int vidx;
+                struct kvm_vcpu *vcpu;
+
+                kvm_for_each_vcpu(vidx, vcpu, kvm)
+                        vcpu->prev_run_delay = vcpu->run_delay;
                 kvm->load_timer_start_time = now;
                 kvm->monitor_timestamp = now;
                 mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(duration_in_msec));

@@ -169,8 +169,9 @@ struct kvm_vcpu {
            indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
         u64 cpu_loads[NR_LOAD_ENTRIES];
 
-        /* VLP */
+        /* run_delay & vlp tracking */
         volatile long state;
+	unsigned long long prev_run_delay, run_delay; /* time spent waiting on a runqueue */
 
         /* vcpu placement */
         cpumask_t cpus_to_run;
