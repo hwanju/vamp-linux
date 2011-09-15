@@ -310,6 +310,9 @@ struct kvm {
         spinlock_t guest_task_lock;
         struct timer_list load_timer;
         u64 load_timer_start_time;
+        u64 monitor_timestamp;
+        int monitor_seqnum;
+
         /* VLP: VCPU-level Parallelism */
         int vlp;                /* current vlp */
         u64 vlp_avg;            /* sum of (vlp * period) during vlp measure period */

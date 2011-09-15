@@ -18,6 +18,9 @@ int kvm_ui_event(struct kvm *kvm, uint32_t arg)
         /* when an ui event is released, set the current timestamp into kvm */
         if (event_type == kvm_kbd_released || event_type == kvm_mouse_released)
                 start_load_monitor(kvm, now, UI_MONITOR_MSEC);
+#if 0
+                initiate_monitor(kvm, now);
+#endif
         return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_ui_event);
