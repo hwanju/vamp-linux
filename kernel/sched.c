@@ -244,6 +244,14 @@ struct cfs_rq;
 
 static LIST_HEAD(task_groups);
 
+#ifdef CONFIG_BALANCE_SCHED
+enum balsched_mode {
+        BALSCHED_DISABLED,
+        BALSCHED_ALL,
+        BALSCHED_VCPUS,
+};
+#endif
+
 /* task group related information */
 struct task_group {
 	struct cgroup_subsys_state css;
@@ -274,6 +282,11 @@ struct task_group {
 
 #ifdef CONFIG_SCHED_AUTOGROUP
 	struct autogroup *autogroup;
+#endif
+
+#ifdef CONFIG_BALANCE_SCHED
+        enum balsched_mode balsched;
+        int balsched_state;             /* BALSCHED_STATE_* (-1,0,1) */
 #endif
 };
 
@@ -309,6 +322,9 @@ struct task_group root_task_group;
 struct cfs_rq {
 	struct load_weight load;
 	unsigned long nr_running;
+#ifdef CONFIG_BALANCE_SCHED
+        unsigned long nr_running_vcpus; 
+#endif
 
 	u64 exec_clock;
 	u64 min_vruntime;
@@ -2401,13 +2417,60 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 	return dest_cpu;
 }
 
+#ifdef CONFIG_BALANCE_SCHED
+static inline void try_to_balance_affine(struct task_struct *p)
+{
+        int i; 
+        struct sched_entity *se = &p->se;
+        struct task_group *tg = se->cfs_rq->tg;
+        cpumask_t balanced_cpus_allowed;
+        int affinity_updated = 0;
+
+        cpus_clear(balanced_cpus_allowed);
+        if (tg->balsched_state == BALSCHED_STATE_ENABLED) {
+                if (tg->balsched == BALSCHED_ALL && likely(!se->on_rq)) {
+                        for_each_possible_cpu(i) {
+                                /* !tg->se[i]->on_rq means its queue has no task */
+                                if (likely(tg->se[i]) && !tg->se[i]->on_rq) {
+                                        cpu_set(i, balanced_cpus_allowed);
+                                        affinity_updated = 1;
+                                }
+                        }
+                }
+                else if (tg->balsched == BALSCHED_VCPUS && se->is_vcpu && likely(!se->on_rq)) {
+                        for_each_possible_cpu(i) {
+                                /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
+                                if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus) {
+                                        cpu_set(i, balanced_cpus_allowed);
+                                        affinity_updated = 1;
+                                }
+                        }
+                }
+        }
+        /* FIXME: Currently assuming the returning affinity of tasks in a group is all cpus */
+        if (tg->balsched_state == BALSCHED_STATE_DISABLED) {
+                cpus_setall(balanced_cpus_allowed);
+                affinity_updated = 1;
+        }
+
+        if (affinity_updated)
+                p->cpus_allowed = balanced_cpus_allowed;
+}
+#endif
+
 /*
  * The caller (fork, wakeup) owns p->pi_lock, ->cpus_allowed is stable.
  */
 static inline
 int select_task_rq(struct task_struct *p, int sd_flags, int wake_flags)
 {
+#ifdef CONFIG_BALANCE_SCHED
+        int cpu;
+        try_to_balance_affine(p);
+	cpu = p->sched_class->select_task_rq(p, sd_flags, wake_flags);
+#else
 	int cpu = p->sched_class->select_task_rq(p, sd_flags, wake_flags);
+#endif
 
 	/*
 	 * In order not to call set_task_cpu() on a blocking task we need
@@ -8992,6 +9055,32 @@ static u64 cpu_shares_read_u64(struct cgroup *cgrp, struct cftype *cft)
 }
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 
+#ifdef CONFIG_BALANCE_SCHED
+static int cpu_balsched_write_u64(struct cgroup *cgrp, struct cftype *cftype,
+                u64 shareval)
+{
+        struct task_group *tg = cgroup_tg(cgrp);
+
+	/* We can't enable balance scheduling for the root cgroup. */
+	if (!tg->se[0])
+		return -EINVAL;
+
+        tg->balsched = (enum balsched_mode) shareval;
+        if (tg->balsched)
+                tg->balsched_state = BALSCHED_STATE_ENABLED;
+        else
+                tg->balsched_state = BALSCHED_STATE_DISABLED;
+        return 0;
+}
+
+static u64 cpu_balsched_read_u64(struct cgroup *cgrp, struct cftype *cft)
+{
+        struct task_group *tg = cgroup_tg(cgrp);
+
+        return (u64) tg->balsched;
+}
+#endif
+
 #ifdef CONFIG_RT_GROUP_SCHED
 static int cpu_rt_runtime_write(struct cgroup *cgrp, struct cftype *cft,
 				s64 val)
@@ -9035,6 +9124,13 @@ static struct cftype cpu_files[] = {
 		.read_u64 = cpu_rt_period_read_uint,
 		.write_u64 = cpu_rt_period_write_uint,
 	},
+#endif
+#ifdef CONFIG_BALANCE_SCHED
+        {
+                .name = "balsched",
+                .read_u64 = cpu_balsched_read_u64,
+                .write_u64 = cpu_balsched_write_u64,
+        },
 #endif
 };
 

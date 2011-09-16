@@ -305,7 +305,6 @@ find_matching_se(struct sched_entity **se, struct sched_entity **pse)
 
 #endif	/* CONFIG_FAIR_GROUP_SCHED */
 
-
 /**************************************************************
  * Scheduling class tree data structure manipulation methods:
  */
@@ -690,6 +689,12 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		add_cfs_task_weight(cfs_rq, se->load.weight);
 		list_add(&se->group_node, &cfs_rq->tasks);
 	}
+#ifdef CONFIG_BALANCE_SCHED
+        if (se->is_vcpu) {
+                se->is_vcpu = VCPU_SE;
+                cfs_rq->nr_running_vcpus++;
+        }
+#endif
 	cfs_rq->nr_running++;
 }
 
@@ -703,6 +708,10 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		add_cfs_task_weight(cfs_rq, -se->load.weight);
 		list_del_init(&se->group_node);
 	}
+#ifdef CONFIG_BALANCE_SCHED
+        if (se->is_vcpu == VCPU_SE)
+                cfs_rq->nr_running_vcpus--;
+#endif
 	cfs_rq->nr_running--;
 }
 
