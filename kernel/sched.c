@@ -2426,34 +2426,35 @@ static inline void try_to_balance_affine(struct task_struct *p)
         cpumask_t balanced_cpus_allowed;
         int affinity_updated = 0;
 
+        if (tg->balsched_state == BALSCHED_STATE_DISABLED)
+                return;
+
         cpus_clear(balanced_cpus_allowed);
-        if (tg->balsched_state == BALSCHED_STATE_ENABLED) {
-                if (tg->balsched == BALSCHED_ALL && likely(!se->on_rq)) {
-                        for_each_possible_cpu(i) {
-                                /* !tg->se[i]->on_rq means its queue has no task */
-                                if (likely(tg->se[i]) && !tg->se[i]->on_rq) {
-                                        cpu_set(i, balanced_cpus_allowed);
-                                        affinity_updated = 1;
-                                }
+        if (tg->balsched == BALSCHED_ALL && likely(!se->on_rq)) {
+                for_each_possible_cpu(i) {
+                        /* !tg->se[i]->on_rq means its queue has no task */
+                        if (likely(tg->se[i]) && !tg->se[i]->on_rq) {
+                                cpu_set(i, balanced_cpus_allowed);
+                                affinity_updated = 1;
                         }
                 }
-                else if (tg->balsched == BALSCHED_VCPUS && se->is_vcpu && likely(!se->on_rq)) {
-                        for_each_possible_cpu(i) {
-                                /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
-                                if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus) {
-                                        cpu_set(i, balanced_cpus_allowed);
-                                        affinity_updated = 1;
-                                }
-                        }
+                /* if no idle cpu exists, return the affinity to all cpus */
+                if (!affinity_updated) {
+                        cpus_setall(balanced_cpus_allowed);
+                        affinity_updated = 1;
                 }
         }
-        /* FIXME: Currently assuming the returning affinity of tasks in a group is all cpus */
-        if (tg->balsched_state == BALSCHED_STATE_DISABLED ||
-            (tg->balsched_state == BALSCHED_STATE_ENABLED && tg->balsched == BALSCHED_ALL && !affinity_updated)) {
-                cpus_setall(balanced_cpus_allowed);
-                affinity_updated = 1;
+        else if (tg->balsched == BALSCHED_VCPUS && se->is_vcpu && likely(!se->on_rq)) {
+                for_each_possible_cpu(i) {
+                        /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
+                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus) {
+                                cpu_set(i, balanced_cpus_allowed);
+                                affinity_updated = 1;
+                        }
+                }
         }
 
+        /* if found, update affinity */
         if (affinity_updated)
                 p->cpus_allowed = balanced_cpus_allowed;
 }
@@ -9068,9 +9069,9 @@ static int cpu_balsched_write_u64(struct cgroup *cgrp, struct cftype *cftype,
 
         tg->balsched = (enum balsched_mode) shareval;
         if (tg->balsched)
-                tg->balsched_state = BALSCHED_STATE_ENABLED;
+                enable_balsched(tg);
         else
-                tg->balsched_state = BALSCHED_STATE_DISABLED;
+                disable_balsched(tg);
         return 0;
 }
 

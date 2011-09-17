@@ -428,7 +428,7 @@ TRACE_EVENT(kvm_vcpu_run_delay,
 		__entry->run_delay      = run_delay;
 	),
 
-	TP_printk("vm%d v%d run_delay=%llu", __entry->vm_id, __entry->vcpu_id, __entry->run_delay)
+        TP_printk("vm%d v%d run_delay=%llu", __entry->vm_id, __entry->vcpu_id, __entry->run_delay)
 );
 
 TRACE_EVENT(kvm_vcpu_load,

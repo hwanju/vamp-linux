@@ -1167,9 +1167,10 @@ struct sched_statistics {
 #endif
 
 #ifdef CONFIG_BALANCE_SCHED
-#define BALSCHED_STATE_DISABLED -1
-#define BALSCHED_STATE_NOP      0
+#define BALSCHED_STATE_DISABLED 0
 #define BALSCHED_STATE_ENABLED  1
+#define enable_balsched(tg)     do { tg->balsched_state = BALSCHED_STATE_ENABLED; } while(0)
+#define disable_balsched(tg)    do { tg->balsched_state = BALSCHED_STATE_DISABLED; } while(0)
 #endif
 
 struct sched_entity {
