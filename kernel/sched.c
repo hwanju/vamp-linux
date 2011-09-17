@@ -2448,7 +2448,8 @@ static inline void try_to_balance_affine(struct task_struct *p)
                 }
         }
         /* FIXME: Currently assuming the returning affinity of tasks in a group is all cpus */
-        if (tg->balsched_state == BALSCHED_STATE_DISABLED) {
+        if (tg->balsched_state == BALSCHED_STATE_DISABLED ||
+            (tg->balsched_state == BALSCHED_STATE_ENABLED && tg->balsched == BALSCHED_ALL && !affinity_updated)) {
                 cpus_setall(balanced_cpus_allowed);
                 affinity_updated = 1;
         }
