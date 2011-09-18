@@ -223,8 +223,7 @@ static void load_timer_handler(unsigned long data)
 
         /* check vcpu load history */
         kvm_for_each_vcpu(vidx, vcpu, kvm) {
-                run_delay = vcpu->prev_run_delay;
-                vcpu->prev_run_delay = vcpu->run_delay;
+                run_delay = vcpu->run_delay - vcpu->prev_run_delay;
 
                 /* we are interested in vcpus that have been scheduled since load timer started */
                 if (!valid_load_entity(kvm, vcpu))
@@ -233,7 +232,6 @@ static void load_timer_handler(unsigned long data)
                 for_each_load_entry(i, start_load_idx, load_idx_by_time(now))
                         trace_kvm_vcpu_load(kvm->vm_id, vcpu->vcpu_id, 
                                         load_idx(vcpu->load_epoch_id), i, vcpu->cpu_loads[i]);
-                run_delay = vcpu->run_delay - run_delay;
                 trace_kvm_vcpu_run_delay(kvm->vm_id, vcpu->vcpu_id, run_delay);
         }
 
@@ -259,11 +257,16 @@ static void load_timer_handler(unsigned long data)
         }
         spin_unlock(&kvm->guest_task_lock);
 
+#if 0
         /* make a decision of vcpu placement policy */
         kvm_for_each_vcpu(vidx, vcpu, kvm) {
                 /* FIXME: Test code */
                 cpu_set(0, vcpu->cpus_to_run);
         }
+#endif
+
+        kvm_for_each_vcpu(vidx, vcpu, kvm)
+                vcpu->prev_run_delay = vcpu->run_delay;
 
         /****************TEST****************/
         kvm->monitor_seqnum++;
@@ -383,6 +386,11 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
         struct guest_thread_info *cur_guest_thread;
         unsigned long long now = sched_clock();
 
+        /* run_delay (wait time) accounting */
+        if (vcpu->state == VCPU_WAITING)
+                vcpu->run_delay += (now - vcpu->last_depart);
+        set_vcpu_state(vcpu, VCPU_RUNNING);
+
         /* recording for arrival */ 
         vcpu->last_arrival = now;
         cur_guest_thread = get_cur_guest_thread(vcpu);
@@ -392,10 +400,6 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 
         trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
                         vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
-
-        if (vcpu->state == VCPU_WAITING)
-                vcpu->run_delay += (now - vcpu->last_depart);
-        set_vcpu_state(vcpu, VCPU_RUNNING);
 
 #if 0   /* VLP disabled */
         /* vlp measure: check if this vcpu has been blocked */
@@ -427,6 +431,12 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
         struct guest_thread_info *cur_guest_thread;
         unsigned long long now = sched_clock();
 
+        /* vcpu state change for run_delay (wait time) accounting */
+        if (likely(vcpu->state == VCPU_RUNNING) && !current->se.on_rq)  /* to be blocked */
+                set_vcpu_state(vcpu, VCPU_BLOCKED);
+        else    /* to wait */
+                set_vcpu_state(vcpu, VCPU_WAITING);
+
         vcpu->last_depart = now;
         cur_guest_thread = get_cur_guest_thread(vcpu);
         if (unlikely(!cur_guest_thread))
@@ -435,11 +445,6 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
 
         trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
                         vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
-
-        if (likely(vcpu->state == VCPU_RUNNING) && !current->se.on_rq)  /* to be blocked */
-                set_vcpu_state(vcpu, VCPU_BLOCKED);
-        else    /* to wait */
-                set_vcpu_state(vcpu, VCPU_WAITING);
 
 #if 0   /* VLP disabled */
         /* vlp measure: check if this vcpu will be blocked*/
