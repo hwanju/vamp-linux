@@ -26,10 +26,13 @@ extern unsigned int load_period_shift;
 
 #define LOAD_MONITOR_PERIOID_EPOCH      (1<<(LOAD_ENTRIES_SHIFT-2))
 
-/* VLP related */
+/* VCPU states */
 #define VCPU_BLOCKED    0
 #define VCPU_WAITING    1 
 #define VCPU_RUNNING    2
+
+/* VCPU flags */
+#define VF_INTERACTIVE  0x00000001      /* I have interactive workloads */
 
 struct guest_thread_info {
         volatile long state;            /* 0 = not running, 1 = running */

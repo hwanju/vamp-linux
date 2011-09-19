@@ -168,9 +168,11 @@ struct kvm_vcpu {
         /* preserving the past cpu loads as well as the current one
            indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
         u64 cpu_loads[NR_LOAD_ENTRIES];
+        u64 prev_cpu_load_avg;
 
         /* run_delay & vlp tracking */
         volatile long state;
+	unsigned int flags;
 	unsigned long long prev_run_delay, run_delay; /* time spent waiting on a runqueue */
 
         /* vcpu placement */

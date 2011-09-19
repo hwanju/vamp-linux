@@ -198,6 +198,28 @@ static inline void init_load_monitor(void)
                         LOAD_EPOCH_TIME_IN_MSEC, load_period_shift);
 }
 
+#define for_each_load_entry(i, _start_load_idx, _end_load_idx)      \
+        for (i = _start_load_idx; i != _end_load_idx; i = load_idx(i + 1))
+//#define get_ewma(_prev, _cur, _w)        ((((_prev) * (10 - (_w)) + (_cur) * _w) + 5) / 10)
+static inline u64 get_vcpu_load_avg(struct kvm_vcpu *vcpu, 
+                unsigned int start_load_idx, unsigned int end_load_idx)
+{
+        int i, nr_epochs = 0;
+        u64 cpu_load_avg = 0;
+        for_each_load_entry(i, start_load_idx, end_load_idx) {
+                //cpu_load_avg = get_ewma(cpu_load_avg, vcpu->cpu_loads[i], weight_to_recent);
+                cpu_load_avg += vcpu->cpu_loads[i];
+                nr_epochs++;
+                trace_kvm_vcpu_load(vcpu->kvm->vm_id, vcpu->vcpu_id, 
+                                load_idx(vcpu->load_epoch_id), i, vcpu->cpu_loads[i]);
+        }
+        return cpu_load_avg / nr_epochs;
+}
+
+#define DEFAULT_LOAD_DELTA_PCT  20
+static unsigned int load_delta_thresh_pct = DEFAULT_LOAD_DELTA_PCT;
+module_param(load_delta_thresh_pct, uint, 0644);
+
 static void load_timer_handler(unsigned long data)
 {
         struct kvm *kvm = (struct kvm *)data;
@@ -205,8 +227,18 @@ static void load_timer_handler(unsigned long data)
         int i, vidx, bidx;
         unsigned long long now = sched_clock();
         unsigned long long run_delay;
-        unsigned int start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
+
+        /* TO BE DEPRECATED!!! temporal */
+        unsigned int __start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
                 load_idx(load_epoch_id(now) + 1) : load_idx_by_time(kvm->monitor_timestamp);
+
+        unsigned int cur_load_idx = load_idx_by_time(now);
+        //unsigned int mon_start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
+        //        load_idx(load_epoch_id(kvm->monitor_timestamp) - 1) : load_idx_by_time(kvm->monitor_timestamp);
+        unsigned int mon_start_load_idx = load_idx_by_time(kvm->monitor_timestamp);
+
+        u64 cur_cpu_load_avg; 
+        s64 delta_load_pct;
 
         BUG_ON(!kvm);
 
@@ -218,8 +250,19 @@ static void load_timer_handler(unsigned long data)
 
         trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, load_period_msec, kvm->monitor_timestamp, now);
 
-#define for_each_load_entry(i, _start_load_idx, _curr_load_idx)      \
-        for (i = _start_load_idx; i != _curr_load_idx; i = load_idx(i + 1))
+        /* For the first monitor perirod, calculate average cpu loads for each vcpu prior to an user event */
+        if (kvm->monitor_seqnum == 0) {
+                unsigned int prev_start_load_idx = load_idx(load_epoch_id(now) + 1);
+                /* exclude a epoch right before a user event considering the load of omen of events like mouse hovering */ 
+                unsigned int prev_end_load_idx = load_idx(load_epoch_id(kvm->monitor_timestamp) - 1);
+
+                kvm_for_each_vcpu(vidx, vcpu, kvm) {
+                        if (!valid_load_entity(kvm, vcpu))
+                                continue;
+                        vcpu->prev_cpu_load_avg = get_vcpu_load_avg(vcpu, prev_start_load_idx, prev_end_load_idx);
+                }
+                trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, load_period_msec, kvm->monitor_timestamp, now); /* For analysis */
+        }
 
         /* check vcpu load history */
         kvm_for_each_vcpu(vidx, vcpu, kvm) {
@@ -229,10 +272,18 @@ static void load_timer_handler(unsigned long data)
                 if (!valid_load_entity(kvm, vcpu))
                         continue;
 
-                for_each_load_entry(i, start_load_idx, load_idx_by_time(now))
-                        trace_kvm_vcpu_load(kvm->vm_id, vcpu->vcpu_id, 
-                                        load_idx(vcpu->load_epoch_id), i, vcpu->cpu_loads[i]);
-                trace_kvm_vcpu_run_delay(kvm->vm_id, vcpu->vcpu_id, run_delay);
+                /* check vcpu load surge */
+                cur_cpu_load_avg = get_vcpu_load_avg(vcpu, mon_start_load_idx, cur_load_idx);
+                delta_load_pct = ((s64)cur_cpu_load_avg - (s64)vcpu->prev_cpu_load_avg) * 100 / LOAD_EPOCH_TIME_IN_NSEC ;
+                delta_load_pct += (run_delay * 100 / (now - kvm->monitor_timestamp));   /* add wait time as possible load */
+
+                /* if load surge after a user event is sufficiently large, consider this vcpu as interective */
+                if (delta_load_pct >= load_delta_thresh_pct) 
+                        vcpu->flags |= VF_INTERACTIVE;
+                else 
+                        vcpu->flags &= ~VF_INTERACTIVE;
+
+                trace_kvm_vcpu_run_delay(kvm->vm_id, vcpu->vcpu_id, run_delay, delta_load_pct, vcpu->flags);
         }
 
         /* check guest task load history */
@@ -247,7 +298,7 @@ static void load_timer_handler(unsigned long data)
                                 /* we are interested in threads that have been scheduled since load timer started */
                                 if (!valid_load_entity(kvm, guest_thread))
                                         continue;
-                                for_each_load_entry(i, start_load_idx, load_idx_by_time(now))
+                                for_each_load_entry(i, __start_load_idx, load_idx_by_time(now))
                                         trace_kvm_gthread_load(kvm->vm_id,
                                                         iter_guest_task->id, vcpu_id, 
                                                         load_idx(guest_thread->load_epoch_id), 
