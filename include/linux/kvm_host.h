@@ -156,6 +156,7 @@ struct kvm_vcpu {
 #endif
 
 #ifdef CONFIG_KVM_VDI
+        int track_cr3_on_ept;
         /* caching the currently running guest task */
         struct guest_task_struct *cur_guest_task;
 #ifdef CONFIG_PREEMPT_NOTIFIERS

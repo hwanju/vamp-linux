@@ -79,8 +79,10 @@ module_param(yield_on_hlt, bool, S_IRUGO);
 static int __read_mostly track_cr3_load = 1;
 module_param(track_cr3_load, bool, S_IRUGO | S_IWUSR);
 
+#if 0
 /* If this value is 1, it starts to track CR3 load in spite of ept */
 static int __read_mostly track_cr3_on_ept;
+#endif
 #endif
 
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
@@ -1631,8 +1633,10 @@ static __init int setup_vmcs_config(struct vmcs_config *vmcs_conf)
 		rdmsr(MSR_IA32_VMX_EPT_VPID_CAP,
 		      vmx_capability.ept, vmx_capability.vpid);
 	}
+#if 0
 #ifdef CONFIG_KVM_VDI
         track_cr3_on_ept = 0;
+#endif
 #endif
 
 	min = 0;
@@ -2070,19 +2074,19 @@ static void ept_update_paging_mode_cr0(unsigned long *hw_cr0,
 			     (CPU_BASED_CR3_LOAD_EXITING |
 			      CPU_BASED_CR3_STORE_EXITING));
 #ifdef CONFIG_KVM_VDI
-                track_cr3_on_ept = 0;
+                vcpu->track_cr3_on_ept = 0;
 #endif
 		vcpu->arch.cr0 = cr0;
 		vmx_set_cr4(vcpu, kvm_read_cr4(vcpu));
 	} else if (!is_paging(vcpu)) {
 		/* From nonpaging to paging */
 #ifdef CONFIG_KVM_VDI
-                track_cr3_on_ept = 0;
+                vcpu->track_cr3_on_ept = 0;
                 if (track_cr3_load) {   /* skip the disable of VM_EXIT for CR3 load */ 
                         vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,
                                         vmcs_read32(CPU_BASED_VM_EXEC_CONTROL) &
                                         ~CPU_BASED_CR3_STORE_EXITING);
-                        track_cr3_on_ept = 1;
+                        vcpu->track_cr3_on_ept = 1;
                 }
                 else     /* if track_cr3_load is disabled, run the following line */
 #endif
@@ -3406,7 +3410,7 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 		case 3:
 #ifdef CONFIG_KVM_VDI
                         track_guest_task(vcpu, val >> PAGE_SHIFT);
-                        if (track_cr3_on_ept) { 
+                        if (vcpu->track_cr3_on_ept) { 
 	                        vmx_flush_tlb(vcpu);    /* FIXME: can it be optimized? */
                                 vmcs_writel(GUEST_CR3, val);
 		                skip_emulated_instruction(vcpu);
