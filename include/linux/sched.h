@@ -1202,6 +1202,7 @@ struct sched_entity {
 #define VCPU_SE         1
 #define NEW_VCPU_SE     2
         int is_vcpu;
+        unsigned int vcpu_flags;
 #endif
 };
 

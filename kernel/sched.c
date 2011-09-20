@@ -246,9 +246,12 @@ static LIST_HEAD(task_groups);
 
 #ifdef CONFIG_BALANCE_SCHED
 enum balsched_mode {
-        BALSCHED_DISABLED,
-        BALSCHED_ALL,
-        BALSCHED_VCPUS,
+        BALSCHED_DISABLED = 0,
+        BALSCHED_ALL,                   /* 1 */
+        BALSCHED_VCPUS,                 /* 2 */
+#ifdef CONFIG_KVM_VDI
+        BALSCHED_VCPUS_ADAPTIVE,        /* 3 */
+#endif
 };
 #endif
 
@@ -2453,6 +2456,28 @@ static inline void try_to_balance_affine(struct task_struct *p)
                         }
                 }
         }
+#ifdef CONFIG_KVM_VDI
+        else if (tg->balsched == BALSCHED_VCPUS_ADAPTIVE && likely(!se->on_rq)) {
+                unsigned long max_weight = 0, max_weight_cpu;
+                for_each_possible_cpu(i) {
+                        /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
+                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus) {
+                                if (tg->se[i]->load.weight > max_weight) {
+                                        max_weight = tg->se[i]->load.weight;
+                                        max_weight_cpu = i;
+                                }
+                                cpu_set(i, balanced_cpus_allowed);
+                                affinity_updated = 1;
+                        }
+                }
+#if 0   /* temporally commented */
+                if (max_weight) {
+                        cpus_clear(balanced_cpus_allowed);
+                        cpu_set(max_weight_cpu, balanced_cpus_allowed);
+                }
+#endif
+        }
+#endif
 
         /* if found, update affinity */
         if (affinity_updated)

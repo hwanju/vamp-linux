@@ -1835,6 +1835,23 @@ wakeup_gran(struct sched_entity *curr, struct sched_entity *se)
 	return calc_delta_fair(gran, se);
 }
 
+#ifdef CONFIG_KVM_VDI
+#include <linux/kvm_task_aware.h>
+static int rq_has_interactive_vcpu(struct cfs_rq *rq)
+{
+	struct task_struct *p;
+        
+        if (unlikely(!rq))
+                return 0;
+
+	list_for_each_entry(p, &rq->tasks, se.group_node) {
+                if (p->se.vcpu_flags & VF_INTERACTIVE)
+                        return 1;
+        }
+        return 0;
+}
+#endif
+
 /*
  * Should 'se' preempt 'curr'.
  *
@@ -1856,6 +1873,12 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 
 	if (vdiff <= 0)
 		return -1;
+#ifdef CONFIG_KVM_VDI
+        if (rq_has_interactive_vcpu(se->my_q))
+                return 1;
+        if (rq_has_interactive_vcpu(curr->my_q))
+                return 0;
+#endif
 
 	gran = wakeup_gran(curr, se);
 	if (vdiff > gran)

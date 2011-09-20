@@ -316,8 +316,23 @@ static void load_timer_handler(unsigned long data)
         }
 #endif
 
-        kvm_for_each_vcpu(vidx, vcpu, kvm)
+        kvm_for_each_vcpu(vidx, vcpu, kvm) {
+		struct task_struct *task = NULL;
+		struct pid *pid;
+
+                rcu_read_lock();
+                pid = rcu_dereference(vcpu->pid);
+                if (pid)
+                        task = get_pid_task(vcpu->pid, PIDTYPE_PID);
+                rcu_read_unlock();
+                if (task) {
+                        /* copy flags to kernel-side entity */
+                        task->se.vcpu_flags = vcpu->flags;
+                        put_task_struct(task);
+                }
+
                 vcpu->prev_run_delay = vcpu->run_delay;
+        }
 
         /****************TEST****************/
         kvm->monitor_seqnum++;
