@@ -32,7 +32,9 @@ extern unsigned int load_period_shift;
 #define VCPU_RUNNING    2
 
 /* VCPU flags */
-#define VF_INTERACTIVE  0x00000001      /* I have interactive workloads */
+#define VF_INTERACTIVE          0x00000001      /* I have interactive workloads */
+#define VF_NEWLY_INTERACTIVE    0x00000002      /* I have newly interactive workloads (only for se's vcpu_flags) */
+#define VF_NEWLY_NORMAL         0x00000004      /* I have newly normal workloads (only for se's vcpu_flags) */
 
 struct guest_thread_info {
         volatile long state;            /* 0 = not running, 1 = running */

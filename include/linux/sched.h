@@ -1198,7 +1198,7 @@ struct sched_entity {
 	struct cfs_rq		*my_q;
 #endif
 
-#ifdef CONFIG_BALANCE_SCHED
+#if (CONFIG_BALANCE_SCHED || CONFIG_KVM_VDI)
 #define VCPU_SE         1
 #define NEW_VCPU_SE     2
         int is_vcpu;
@@ -2010,6 +2010,10 @@ static inline unsigned int get_sysctl_timer_migration(void)
 	return 1;
 }
 #endif
+#ifdef CONFIG_KVM_VDI
+extern unsigned int sysctl_sched_interactive_preempt;
+extern unsigned int sysctl_sched_aggressive_load;
+#endif
 extern unsigned int sysctl_sched_rt_period;
 extern int sysctl_sched_rt_runtime;
 
@@ -2709,6 +2713,11 @@ static inline unsigned long rlimit_max(unsigned int limit)
 {
 	return task_rlimit_max(current, limit);
 }
+
+#ifdef CONFIG_KVM_VDI
+extern void inc_tg_interactive_count(struct sched_entity *se);
+extern void dec_tg_interactive_count(struct sched_entity *se);
+#endif
 
 #endif /* __KERNEL__ */
 

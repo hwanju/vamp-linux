@@ -213,6 +213,10 @@ void print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq)
 	SEQ_printf(m, "  .%-30s: %d\n", "load_tg",
 			atomic_read(&cfs_rq->tg->load_weight));
 #endif
+#ifdef CONFIG_KVM_VDI
+	SEQ_printf(m, "  .%-30s: %d\n", "interactive_count",
+			atomic_read(&cfs_rq->tg->interactive_count));
+#endif
 
 	print_cfs_group_stats(m, cpu, cfs_rq->tg);
 #endif

@@ -227,6 +227,7 @@ static void load_timer_handler(unsigned long data)
         int i, vidx, bidx;
         unsigned long long now = sched_clock();
         unsigned long long run_delay;
+        int se_vcpu_flags[KVM_MAX_VCPUS];       /* shadow copy of vcpu flags for se */
 
         /* TO BE DEPRECATED!!! temporal */
         unsigned int __start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
@@ -267,6 +268,7 @@ static void load_timer_handler(unsigned long data)
         /* check vcpu load history */
         kvm_for_each_vcpu(vidx, vcpu, kvm) {
                 run_delay = vcpu->run_delay - vcpu->prev_run_delay;
+                se_vcpu_flags[vidx] = 0;
 
                 /* we are interested in vcpus that have been scheduled since load timer started */
                 if (!valid_load_entity(kvm, vcpu))
@@ -278,10 +280,16 @@ static void load_timer_handler(unsigned long data)
                 delta_load_pct += (run_delay * 100 / (now - kvm->monitor_timestamp));   /* add wait time as possible load */
 
                 /* if load surge after a user event is sufficiently large, consider this vcpu as interective */
-                if (delta_load_pct >= load_delta_thresh_pct) 
+                if (delta_load_pct >= load_delta_thresh_pct) {
+                        if (!(vcpu->flags & VF_INTERACTIVE))
+                                se_vcpu_flags[vidx] |= VF_NEWLY_INTERACTIVE;
                         vcpu->flags |= VF_INTERACTIVE;
-                else 
+                }
+                else {
+                        if (vcpu->flags & VF_INTERACTIVE)
+                                se_vcpu_flags[vidx] |= VF_NEWLY_NORMAL;
                         vcpu->flags &= ~VF_INTERACTIVE;
+                }
 
                 trace_kvm_vcpu_run_delay(kvm->vm_id, vcpu->vcpu_id, run_delay, delta_load_pct, vcpu->flags);
         }
@@ -320,6 +328,11 @@ static void load_timer_handler(unsigned long data)
 		struct task_struct *task = NULL;
 		struct pid *pid;
 
+                vcpu->prev_run_delay = vcpu->run_delay;
+
+                if (!valid_load_entity(kvm, vcpu))
+                        continue;
+
                 rcu_read_lock();
                 pid = rcu_dereference(vcpu->pid);
                 if (pid)
@@ -327,11 +340,13 @@ static void load_timer_handler(unsigned long data)
                 rcu_read_unlock();
                 if (task) {
                         /* copy flags to kernel-side entity */
-                        task->se.vcpu_flags = vcpu->flags;
+                        task->se.vcpu_flags = se_vcpu_flags[vidx];
+                        if (se_vcpu_flags[vidx] & VF_NEWLY_INTERACTIVE)
+                                inc_tg_interactive_count(&task->se);
+                        else if (se_vcpu_flags[vidx] & VF_NEWLY_NORMAL)
+                                dec_tg_interactive_count(&task->se);
                         put_task_struct(task);
                 }
-
-                vcpu->prev_run_delay = vcpu->run_delay;
         }
 
         /****************TEST****************/

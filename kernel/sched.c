@@ -249,9 +249,8 @@ enum balsched_mode {
         BALSCHED_DISABLED = 0,
         BALSCHED_ALL,                   /* 1 */
         BALSCHED_VCPUS,                 /* 2 */
-#ifdef CONFIG_KVM_VDI
-        BALSCHED_VCPUS_ADAPTIVE,        /* 3 */
-#endif
+        BALSCHED_ALL_FAIR,              /* 3 */
+        BALSCHED_VCPUS_FAIR,            /* 4 */
 };
 #endif
 
@@ -290,6 +289,10 @@ struct task_group {
 #ifdef CONFIG_BALANCE_SCHED
         enum balsched_mode balsched;
         int balsched_state;             /* BALSCHED_STATE_* (-1,0,1) */
+#endif
+
+#ifdef CONFIG_KVM_VDI
+        atomic_t interactive_count;
 #endif
 };
 
@@ -2395,6 +2398,35 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 	int dest_cpu;
 	const struct cpumask *nodemask = cpumask_of_node(cpu_to_node(cpu));
 
+#ifdef CONFIG_BALANCE_SCHED
+        struct task_group *tg = p->se.cfs_rq->tg;
+        if (tg->balsched == BALSCHED_ALL_FAIR || tg->balsched == BALSCHED_VCPUS_FAIR) {
+                unsigned long wl, min_weight = -1UL;
+                int min_weight_cpu = -1;
+                /* Look for allowed, online CPU in same node. */
+                for_each_cpu_and(dest_cpu, nodemask, cpu_active_mask) {
+                        if (cpumask_test_cpu(dest_cpu, &p->cpus_allowed)) {
+                                wl = weighted_cpuload(dest_cpu);
+                                if (wl < min_weight) {
+                                        min_weight = wl;
+                                        min_weight_cpu = dest_cpu;
+                                }
+                        }
+                }
+                if (min_weight_cpu >= 0) 
+                        return min_weight_cpu;
+                for_each_cpu_and(dest_cpu, &p->cpus_allowed, cpu_active_mask) {
+                        wl = weighted_cpuload(dest_cpu);
+                        if (wl < min_weight) {
+                                min_weight = wl;
+                                min_weight_cpu = dest_cpu;
+                        }
+                }
+                if (min_weight_cpu >= 0) 
+                        return min_weight_cpu;
+                goto not_found;
+        }
+#endif  /* CONFIG_BALANCE_SCHED */
 	/* Look for allowed, online CPU in same node. */
 	for_each_cpu_and(dest_cpu, nodemask, cpu_active_mask)
 		if (cpumask_test_cpu(dest_cpu, &p->cpus_allowed))
@@ -2405,6 +2437,9 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 	if (dest_cpu < nr_cpu_ids)
 		return dest_cpu;
 
+#ifdef CONFIG_BALANCE_SCHED
+not_found:
+#endif
 	/* No more Mr. Nice Guy. */
 	dest_cpu = cpuset_cpus_allowed_fallback(p);
 	/*
@@ -2428,15 +2463,26 @@ static inline void try_to_balance_affine(struct task_struct *p)
         struct task_group *tg = se->cfs_rq->tg;
         cpumask_t balanced_cpus_allowed;
         int affinity_updated = 0;
+        unsigned long max_weight = 0; 
+        int max_weight_cpu = -1;
 
         if (tg->balsched_state == BALSCHED_STATE_DISABLED)
                 return;
 
         cpus_clear(balanced_cpus_allowed);
-        if (tg->balsched == BALSCHED_ALL && likely(!se->on_rq)) {
-                for_each_possible_cpu(i) {
+        if (tg->balsched == BALSCHED_ALL_FAIR || tg->balsched == BALSCHED_VCPUS_FAIR) {
+                for_each_cpu(i, cpu_active_mask) {
+                        unsigned long wl = weighted_cpuload(i);
+                        if (wl > max_weight) {
+                                max_weight = wl;
+                                max_weight_cpu = i;
+                        }
+                }
+        }
+        if ((tg->balsched == BALSCHED_ALL || tg->balsched == BALSCHED_ALL_FAIR) && likely(!se->on_rq)) {
+                for_each_cpu(i, cpu_active_mask) {
                         /* !tg->se[i]->on_rq means its queue has no task */
-                        if (likely(tg->se[i]) && !tg->se[i]->on_rq) {
+                        if (likely(tg->se[i]) && !tg->se[i]->on_rq && i != max_weight_cpu) {
                                 cpu_set(i, balanced_cpus_allowed);
                                 affinity_updated = 1;
                         }
@@ -2447,38 +2493,15 @@ static inline void try_to_balance_affine(struct task_struct *p)
                         affinity_updated = 1;
                 }
         }
-        else if (tg->balsched == BALSCHED_VCPUS && se->is_vcpu && likely(!se->on_rq)) {
-                for_each_possible_cpu(i) {
+        else if ((tg->balsched == BALSCHED_VCPUS || tg->balsched == BALSCHED_VCPUS_FAIR) && se->is_vcpu && likely(!se->on_rq)) {
+                for_each_cpu(i, cpu_active_mask) {
                         /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
-                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus) {
+                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus && i != max_weight_cpu) {
                                 cpu_set(i, balanced_cpus_allowed);
                                 affinity_updated = 1;
                         }
                 }
         }
-#ifdef CONFIG_KVM_VDI
-        else if (tg->balsched == BALSCHED_VCPUS_ADAPTIVE && likely(!se->on_rq)) {
-                unsigned long max_weight = 0, max_weight_cpu;
-                for_each_possible_cpu(i) {
-                        /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
-                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus) {
-                                if (tg->se[i]->load.weight > max_weight) {
-                                        max_weight = tg->se[i]->load.weight;
-                                        max_weight_cpu = i;
-                                }
-                                cpu_set(i, balanced_cpus_allowed);
-                                affinity_updated = 1;
-                        }
-                }
-#if 0   /* temporally commented */
-                if (max_weight) {
-                        cpus_clear(balanced_cpus_allowed);
-                        cpu_set(max_weight_cpu, balanced_cpus_allowed);
-                }
-#endif
-        }
-#endif
-
         /* if found, update affinity */
         if (affinity_updated)
                 p->cpus_allowed = balanced_cpus_allowed;
@@ -9457,3 +9480,18 @@ struct cgroup_subsys cpuacct_subsys = {
 };
 #endif	/* CONFIG_CGROUP_CPUACCT */
 
+#ifdef CONFIG_KVM_VDI
+void inc_tg_interactive_count(struct sched_entity *se)
+{
+        if (likely(se && se->cfs_rq))
+                atomic_inc(&se->cfs_rq->tg->interactive_count);
+}
+EXPORT_SYMBOL_GPL(inc_tg_interactive_count);
+
+void dec_tg_interactive_count(struct sched_entity *se)
+{
+        if (likely(se && se->cfs_rq))
+                atomic_dec(&se->cfs_rq->tg->interactive_count);
+}
+EXPORT_SYMBOL_GPL(dec_tg_interactive_count);
+#endif
