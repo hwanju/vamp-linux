@@ -90,9 +90,12 @@ const_debug unsigned int sysctl_sched_migration_cost = 500000UL;
 unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
 #ifdef CONFIG_KVM_VDI
 unsigned int __read_mostly sysctl_sched_interactive_preempt = 1;
-unsigned int __read_mostly sysctl_sched_aggressive_load = 1;
+unsigned int __read_mostly sysctl_sched_aggressive_load = 0;
 #endif
 
+#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
+#define entity_is_l1_group(se)  (!se->parent && se->my_q)
+#endif
 static const struct sched_class fair_sched_class;
 
 /**************************************************************
@@ -810,7 +813,7 @@ static void update_cfs_load(struct cfs_rq *cfs_rq, int global_update)
 		cfs_rq->load_avg += delta * load;
 	}
 #ifdef CONFIG_KVM_VDI
-        else if (sysctl_sched_aggressive_load) {  /* load == 0 */
+        else if (sysctl_sched_aggressive_load && cfs_rq->nr_running_vcpus) {  /* load == 0 */
 		cfs_rq->load_avg = 0;
 		cfs_rq->load_period = 0;
                 update_cfs_rq_load_contribution(cfs_rq, global_update);
@@ -896,6 +899,19 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
 		account_entity_enqueue(cfs_rq, se);
 }
 
+#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
+static inline void update_shares_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)
+{
+        u64 now, delta;
+
+        now = rq_of(cfs_rq)->clock_task;
+        delta = now - se->shares_sum_exec_runtime;
+        se->shares_sum_exec_runtime = now;
+        se->lag_monitor_period += delta;
+        se->shares_avg += delta * se->load.weight;
+}
+#endif
+
 static void update_cfs_shares(struct cfs_rq *cfs_rq)
 {
 	struct task_group *tg;
@@ -911,6 +927,10 @@ static void update_cfs_shares(struct cfs_rq *cfs_rq)
 		return;
 #endif
 	shares = calc_cfs_shares(cfs_rq, tg);
+#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
+        if (entity_is_l1_group(se) && cfs_rq->curr == se)
+                update_shares_avg(cfs_rq, se);
+#endif
 
 	reweight_entity(cfs_rq_of(se), se, shares);
 }
@@ -1225,6 +1245,12 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 			se->sum_exec_runtime - se->prev_sum_exec_runtime);
 	}
 #endif
+#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
+        if (entity_is_l1_group(se)) {
+                se->shares_avg = se->lag_monitor_period = 0;    /* FIXME */
+                se->shares_sum_exec_runtime = se->sum_exec_runtime;
+        }
+#endif
 	se->prev_sum_exec_runtime = se->sum_exec_runtime;
 }
 
@@ -1286,6 +1312,12 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 		__enqueue_entity(cfs_rq, prev);
 	}
 	cfs_rq->curr = NULL;
+#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
+        if (entity_is_l1_group(prev)) {
+                update_shares_avg(cfs_rq, prev);
+                trace_sched_lag(cpu_of(rq_of(cfs_rq)), prev->shares_avg, prev->lag_monitor_period);
+        }
+#endif
 }
 
 static void

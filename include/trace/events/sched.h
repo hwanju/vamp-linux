@@ -390,6 +390,29 @@ TRACE_EVENT(sched_pi_setprio,
 			__entry->comm, __entry->pid,
 			__entry->oldprio, __entry->newprio)
 );
+#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
+TRACE_EVENT(sched_lag,
+
+	TP_PROTO(int cpu, u64 shares_avg, u64 lag_monitor_period),
+
+	TP_ARGS(cpu, shares_avg, lag_monitor_period),
+
+	TP_STRUCT__entry(
+		__field( int,   cpu                     )
+		__field( u64,	shares_avg              )
+		__field( u64,	lag_monitor_period      )
+	),
+
+	TP_fast_assign(
+		__entry->cpu                    = cpu;
+		__entry->shares_avg             = shares_avg;
+		__entry->lag_monitor_period     = lag_monitor_period;
+	),
+
+	TP_printk("cpu%d shares_avg=%llu lag_monitor_period=%llu",
+                __entry->cpu, __entry->shares_avg, __entry->lag_monitor_period)
+);
+#endif
 
 #endif /* _TRACE_SCHED_H */
 

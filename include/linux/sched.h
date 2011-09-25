@@ -1171,6 +1171,7 @@ struct sched_statistics {
 #define BALSCHED_STATE_ENABLED  1
 #define enable_balsched(tg)     do { tg->balsched_state = BALSCHED_STATE_ENABLED; } while(0)
 #define disable_balsched(tg)    do { tg->balsched_state = BALSCHED_STATE_DISABLED; } while(0)
+extern unsigned int sysctl_balsched_load_imbalance_pct;
 #endif
 
 struct sched_entity {
@@ -1203,6 +1204,12 @@ struct sched_entity {
 #define NEW_VCPU_SE     2
         int is_vcpu;
         unsigned int vcpu_flags;
+#endif
+
+#ifdef CONFIG_BALANCE_SCHED
+        u64 shares_sum_exec_runtime;
+        u64 shares_avg;
+	u64 lag_monitor_period;
 #endif
 };
 

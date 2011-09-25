@@ -139,9 +139,6 @@ void vcpu_load(struct kvm_vcpu *vcpu)
 {
 	int cpu;
 
-#ifdef CONFIG_BALANCE_SCHED
-        current->se.is_vcpu = unlikely(!current->se.is_vcpu) ? NEW_VCPU_SE : VCPU_SE;
-#endif
 	mutex_lock(&vcpu->mutex);
 	if (unlikely(vcpu->pid != current->pids[PIDTYPE_PID].pid)) {
 		/* The thread running this VCPU changed. */
@@ -149,16 +146,6 @@ void vcpu_load(struct kvm_vcpu *vcpu)
 		struct pid *newpid = get_task_pid(current, PIDTYPE_PID);
 		rcu_assign_pointer(vcpu->pid, newpid);
 		synchronize_rcu();
-#ifdef CONFIG_BALANCE_SCHED
-                {
-                        struct task_struct *oldtask;
-			oldtask = get_pid_task(oldpid, PIDTYPE_PID);
-                        if (oldtask) {
-                                oldtask->se.is_vcpu = 0;
-                                put_task_struct(oldtask);
-                        }
-                }
-#endif
 		put_pid(oldpid);
 	}
 	cpu = get_cpu();
@@ -1637,6 +1624,10 @@ static int kvm_vm_ioctl_create_vcpu(struct kvm *kvm, u32 id)
 	preempt_notifier_init(&vcpu->preempt_notifier, &kvm_preempt_ops);
 #ifdef CONFIG_KVM_VDI
         init_task_aware_vcpu(vcpu);
+#endif
+
+#ifdef CONFIG_BALANCE_SCHED
+        current->se.is_vcpu = NEW_VCPU_SE;
 #endif
 
 	r = kvm_arch_vcpu_setup(vcpu);
