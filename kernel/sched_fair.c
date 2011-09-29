@@ -1083,6 +1083,11 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	if (se != cfs_rq->curr)
 		__enqueue_entity(cfs_rq, se);
 	se->on_rq = 1;
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+        if (se->ipi_pending) 
+                __list_add_ipi_pending(task_of(se), se->ipi_pending);
+#endif
 
 	if (cfs_rq->nr_running == 1)
 		list_add_leaf_cfs_rq(cfs_rq);
@@ -1269,6 +1274,16 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 	struct sched_entity *se = __pick_first_entity(cfs_rq);
 	struct sched_entity *left = se;
 
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+        struct sched_entity *p, *n;
+
+        list_for_each_entry_safe(p, n, &cfs_rq->ipi_pending_list, ipi_pending_node) {
+                list_del_init(&p->ipi_pending_node);
+                if (p->on_rq && cfs_rq_of(p) == cfs_rq)
+                        return p;
+        }
+#endif
 	/*
 	 * Avoid running the skip buddy, if running something else can
 	 * be done without getting too unfair.
@@ -1386,6 +1401,12 @@ static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
 
 		hrtick_start(rq, delta);
 	}
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+        else if (!list_empty(&cfs_rq->ipi_pending_list) && 
+                        cpu_active(cpu_of(rq)) && hrtimer_is_hres_active(&rq->hrtick_timer)) 
+                hrtick_start(rq, 100000LL);    /* FIXME: 100us */
+#endif
 }
 
 /*
@@ -2089,6 +2110,10 @@ static void put_prev_task_fair(struct rq *rq, struct task_struct *prev)
 	struct sched_entity *se = &prev->se;
 	struct cfs_rq *cfs_rq;
 
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+        se->ipi_pending = 0;
+#endif
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		put_prev_entity(cfs_rq, se);

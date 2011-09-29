@@ -413,6 +413,31 @@ TRACE_EVENT(sched_lag,
                 __entry->cpu, __entry->shares_avg, __entry->lag_monitor_period)
 );
 #endif
+#ifdef CONFIG_KVM_VDI   /* hwandori-experimental */
+TRACE_EVENT(sched_ipi_futex,
+
+	TP_PROTO(struct task_struct *source_task, struct task_struct *target_task),
+
+	TP_ARGS(source_task, target_task),
+
+	TP_STRUCT__entry(
+		__field( pid_t, source_pid              )
+		__field( int,	source_type             )
+		__field( pid_t,	target_pid              )
+		__field( int,	target_type             )
+	),
+
+	TP_fast_assign(
+		__entry->source_pid             = source_task->pid;
+                __entry->source_type            = source_task->se.ipi_pending;
+		__entry->target_pid             = target_task->pid;
+                __entry->target_type            = target_task->se.ipi_pending;
+	),
+
+	TP_printk("source_pid=%d (type=%d) -> target_pid=%d (type=%d)",
+                __entry->source_pid, __entry->source_type, __entry->target_pid, __entry->target_type)
+);
+#endif
 
 #endif /* _TRACE_SCHED_H */
 

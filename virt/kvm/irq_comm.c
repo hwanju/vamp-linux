@@ -100,6 +100,21 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			if (r < 0)
 				r = 0;
 			r += kvm_apic_set_irq(vcpu, irq);
+#ifdef CONFIG_KVM_VDI
+                        if (irq->ipi == 1) {
+                                struct task_struct *task = NULL;
+                                struct pid *pid;
+                                rcu_read_lock();
+                                pid = rcu_dereference(vcpu->pid);
+                                if (pid)
+                                        task = get_pid_task(vcpu->pid, PIDTYPE_PID);
+                                rcu_read_unlock();
+                                if (task) {
+                                        list_add_ipi_pending(task);
+                                        put_task_struct(task);
+                                }
+                        }
+#endif
 		} else if (kvm_lapic_enabled(vcpu)) {
 			if (!lowest)
 				lowest = vcpu;
@@ -133,6 +148,10 @@ int kvm_set_msi(struct kvm_kernel_irq_routing_entry *e,
 	irq.delivery_mode = e->msi.data & 0x700;
 	irq.level = 1;
 	irq.shorthand = 0;
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+        irq.ipi = 0;
+#endif
 
 	/* TODO Deal with RH bit of MSI message address */
 	return kvm_irq_delivery_to_apic(kvm, NULL, &irq);

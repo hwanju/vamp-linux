@@ -1204,6 +1204,8 @@ struct sched_entity {
 #define NEW_VCPU_SE     2
         int is_vcpu;
         unsigned int vcpu_flags;
+        struct list_head ipi_pending_node;      /* hwandori-experimental */
+        int ipi_pending;
 #endif
 
 #ifdef CONFIG_BALANCE_SCHED
@@ -2018,6 +2020,12 @@ static inline unsigned int get_sysctl_timer_migration(void)
 }
 #endif
 #ifdef CONFIG_KVM_VDI
+/* ipi pending type */
+#define KVM_IPI_DIRECT          1
+#define KVM_IPI_INDIRECT        2
+/* parameters */
+extern unsigned int sysctl_kvm_ipi_first;
+extern unsigned int sysctl_kvm_ipi_indirect;
 extern unsigned int sysctl_sched_interactive_preempt;
 extern unsigned int sysctl_sched_aggressive_load;
 #endif
@@ -2724,6 +2732,7 @@ static inline unsigned long rlimit_max(unsigned int limit)
 #ifdef CONFIG_KVM_VDI
 extern void inc_tg_interactive_count(struct sched_entity *se);
 extern void dec_tg_interactive_count(struct sched_entity *se);
+extern void list_add_ipi_pending(struct task_struct *p);
 #endif
 
 #endif /* __KERNEL__ */

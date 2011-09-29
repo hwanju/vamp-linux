@@ -356,6 +356,24 @@ static struct ctl_table kern_table[] = {
 #endif
 #ifdef CONFIG_KVM_VDI
 	{
+		.procname	= "kvm_ipi_first",
+		.data		= &sysctl_kvm_ipi_first,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one,
+	},
+	{
+		.procname	= "kvm_ipi_indirect",
+		.data		= &sysctl_kvm_ipi_indirect,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one,
+	},
+	{
 		.procname	= "sched_interactive_preempt",
 		.data		= &sysctl_sched_interactive_preempt,
 		.maxlen		= sizeof(unsigned int),

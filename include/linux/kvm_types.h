@@ -65,6 +65,10 @@ struct kvm_lapic_irq {
 	u32 trig_mode;
 	u32 shorthand;
 	u32 dest_id;
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+        u32 ipi;
+#endif
 };
 
 struct gfn_to_hva_cache {

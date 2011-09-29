@@ -344,6 +344,11 @@ struct cfs_rq {
 
 	struct list_head tasks;
 	struct list_head *balance_iterator;
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+	struct list_head ipi_pending_list;
+	raw_spinlock_t ipi_pending_list_lock;
+#endif
 
 	/*
 	 * 'curr' points to currently running entity on this cfs_rq.
@@ -2049,6 +2054,71 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
 
+#ifdef CONFIG_KVM_VDI
+void inc_tg_interactive_count(struct sched_entity *se)
+{
+        if (likely(se && se->cfs_rq))
+                atomic_inc(&se->cfs_rq->tg->interactive_count);
+}
+EXPORT_SYMBOL_GPL(inc_tg_interactive_count);
+
+void dec_tg_interactive_count(struct sched_entity *se)
+{
+        if (likely(se && se->cfs_rq))
+                atomic_dec(&se->cfs_rq->tg->interactive_count);
+}
+EXPORT_SYMBOL_GPL(dec_tg_interactive_count);
+
+/* hwandori-experimental: below two functions - FIXME: -> static */
+unsigned int __read_mostly sysctl_kvm_ipi_first    = 1;
+unsigned int __read_mostly sysctl_kvm_ipi_indirect = 1;
+
+#include <linux/futex.h>
+
+int __list_add_ipi_pending(struct task_struct *p, int type)
+{
+        struct sched_entity *se = &p->se;
+        struct cfs_rq *cfs_rq = se->cfs_rq;
+
+        se->ipi_pending = type;
+        if (se->on_rq) {
+                if (list_empty(&se->ipi_pending_node) && cfs_rq->curr != se) {
+                        list_add_tail(&se->ipi_pending_node, &cfs_rq->ipi_pending_list);
+                        resched_task(cfs_rq->rq->curr);
+                }
+                return 1;
+        }
+        return 0;
+}
+void list_add_ipi_pending(struct task_struct *p)
+{
+        struct rq *rq;
+        unsigned long flags;
+        int ret;
+
+        if (!sysctl_kvm_ipi_first)
+                return;
+
+        rq = task_rq_lock(p, &flags);
+        ret = __list_add_ipi_pending(p, KVM_IPI_DIRECT);
+        task_rq_unlock(rq, p, &flags); 
+
+        if (sysctl_kvm_ipi_indirect && !ret)  {     /* not on rq */
+                struct task_struct *owner = get_futex_owner(p);
+
+                if (!owner)
+                        return;
+
+                rq = task_rq_lock(owner, &flags);
+                __list_add_ipi_pending(owner, KVM_IPI_INDIRECT);   /* only start point of assigning KVM_IPI_INDIRECT */
+                task_rq_unlock(rq, owner, &flags); 
+
+                trace_sched_ipi_futex(p, owner);
+        }
+}
+EXPORT_SYMBOL_GPL(list_add_ipi_pending);
+#endif
+
 #include "sched_idletask.c"
 #include "sched_fair.c"
 #include "sched_rt.c"
@@ -2951,6 +3021,10 @@ static void __sched_fork(struct task_struct *p)
 	p->se.nr_migrations		= 0;
 	p->se.vruntime			= 0;
 	INIT_LIST_HEAD(&p->se.group_node);
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+	INIT_LIST_HEAD(&p->se.ipi_pending_node);
+#endif
 
 #ifdef CONFIG_SCHEDSTATS
 	memset(&p->se.statistics, 0, sizeof(p->se.statistics));
@@ -4404,8 +4478,13 @@ need_resched:
 
 	schedule_debug(prev);
 
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+	hrtick_clear(rq);
+#else
 	if (sched_feat(HRTICK))
 		hrtick_clear(rq);
+#endif
 
 	raw_spin_lock_irq(&rq->lock);
 
@@ -8046,6 +8125,11 @@ static void init_cfs_rq(struct cfs_rq *cfs_rq, struct rq *rq)
 {
 	cfs_rq->tasks_timeline = RB_ROOT;
 	INIT_LIST_HEAD(&cfs_rq->tasks);
+#ifdef CONFIG_KVM_VDI
+        /* hwandori-experimental */
+	INIT_LIST_HEAD(&cfs_rq->ipi_pending_list);
+        raw_spin_lock_init(&cfs_rq->ipi_pending_list_lock);
+#endif
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	cfs_rq->rq = rq;
 	/* allow initial update_cfs_load() to truncate */
@@ -9511,18 +9595,3 @@ struct cgroup_subsys cpuacct_subsys = {
 };
 #endif	/* CONFIG_CGROUP_CPUACCT */
 
-#ifdef CONFIG_KVM_VDI
-void inc_tg_interactive_count(struct sched_entity *se)
-{
-        if (likely(se && se->cfs_rq))
-                atomic_inc(&se->cfs_rq->tg->interactive_count);
-}
-EXPORT_SYMBOL_GPL(inc_tg_interactive_count);
-
-void dec_tg_interactive_count(struct sched_entity *se)
-{
-        if (likely(se && se->cfs_rq))
-                atomic_dec(&se->cfs_rq->tg->interactive_count);
-}
-EXPORT_SYMBOL_GPL(dec_tg_interactive_count);
-#endif
