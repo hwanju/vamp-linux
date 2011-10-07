@@ -101,7 +101,7 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 				r = 0;
 			r += kvm_apic_set_irq(vcpu, irq);
 #ifdef CONFIG_KVM_VDI
-                        if (irq->ipi == 1) {
+                        if (irq->ipi == 1 && (irq->shorthand == APIC_DEST_ALLBUT || irq->shorthand == APIC_DEST_ALLINC)) {
                                 struct task_struct *task = NULL;
                                 struct pid *pid;
                                 rcu_read_lock();

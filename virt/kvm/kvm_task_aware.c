@@ -230,12 +230,10 @@ static void load_timer_handler(unsigned long data)
         int se_vcpu_flags[KVM_MAX_VCPUS];       /* shadow copy of vcpu flags for se */
 
         /* TO BE DEPRECATED!!! temporal */
-        unsigned int __start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
-                load_idx(load_epoch_id(now) + 1) : load_idx_by_time(kvm->monitor_timestamp);
+        //unsigned int __start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
+        //        load_idx(load_epoch_id(now) + 1) : load_idx_by_time(kvm->monitor_timestamp);
 
         unsigned int cur_load_idx = load_idx_by_time(now);
-        //unsigned int mon_start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
-        //        load_idx(load_epoch_id(kvm->monitor_timestamp) - 1) : load_idx_by_time(kvm->monitor_timestamp);
         unsigned int mon_start_load_idx = load_idx_by_time(kvm->monitor_timestamp);
 
         u64 cur_cpu_load_avg; 
@@ -262,6 +260,29 @@ static void load_timer_handler(unsigned long data)
                                 continue;
                         vcpu->prev_cpu_load_avg = get_vcpu_load_avg(vcpu, prev_start_load_idx, prev_end_load_idx);
                 }
+
+                /* only for load profiling */
+                spin_lock(&kvm->guest_task_lock);
+                for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
+                        struct guest_task_struct *iter_guest_task;
+                        struct hlist_node *node;
+                        hlist_for_each_entry(iter_guest_task, node, &kvm->guest_task_hash[bidx], link) {
+                                int vcpu_id;
+                                for (vcpu_id = 0; vcpu_id < MAX_GUEST_TASK_VCPU; vcpu_id++) {
+                                        struct guest_thread_info *guest_thread = &iter_guest_task->threads[vcpu_id];
+                                        /* we are interested in threads that have been scheduled since load timer started */
+                                        if (!valid_load_entity(kvm, guest_thread))
+                                                continue;
+                                        for_each_load_entry(i, prev_start_load_idx, prev_end_load_idx)
+                                                trace_kvm_gthread_load(kvm->vm_id,
+                                                                iter_guest_task->id, vcpu_id, 
+                                                                load_idx(guest_thread->load_epoch_id), 
+                                                                i, guest_thread->cpu_loads[i]);
+                                }
+                        }
+                }
+                spin_unlock(&kvm->guest_task_lock);
+
                 trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, load_period_msec, kvm->monitor_timestamp, now); /* For analysis */
         }
 
@@ -306,7 +327,7 @@ static void load_timer_handler(unsigned long data)
                                 /* we are interested in threads that have been scheduled since load timer started */
                                 if (!valid_load_entity(kvm, guest_thread))
                                         continue;
-                                for_each_load_entry(i, __start_load_idx, load_idx_by_time(now))
+                                for_each_load_entry(i, mon_start_load_idx, cur_load_idx)
                                         trace_kvm_gthread_load(kvm->vm_id,
                                                         iter_guest_task->id, vcpu_id, 
                                                         load_idx(guest_thread->load_epoch_id), 
@@ -316,14 +337,7 @@ static void load_timer_handler(unsigned long data)
         }
         spin_unlock(&kvm->guest_task_lock);
 
-#if 0
-        /* make a decision of vcpu placement policy */
-        kvm_for_each_vcpu(vidx, vcpu, kvm) {
-                /* FIXME: Test code */
-                cpu_set(0, vcpu->cpus_to_run);
-        }
-#endif
-
+        /* set interactive vcpu information to sched_entity so that scheduler can consider it */
         kvm_for_each_vcpu(vidx, vcpu, kvm) {
 		struct task_struct *task = NULL;
 		struct pid *pid;

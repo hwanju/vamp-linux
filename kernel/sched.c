@@ -2551,9 +2551,25 @@ static inline int cause_load_imbalance(struct task_group *tg, int cpu,
 
         return cpu_load > weight_per_cpu;
 }
-static inline void try_to_balance_affine(struct task_struct *p)
+static inline unsigned long group_weight_ratio(struct task_group *tg, int cpu, unsigned long weight)
+{
+        unsigned int scale = 10;
+	unsigned long group_weight = tg->se[cpu]->load.weight;
+        unsigned long others_weight = weighted_cpuload(cpu) - group_weight;
+
+        group_weight += effective_load(tg, cpu, weight, weight);
+        group_weight <<= scale;
+
+        //printk("[DEBUG] cpu%d weight=%lu group_weight=%lu (old=%lu) / others_weight=%lu (total=%lu) ratio=%lu\n",
+        //                cpu, weight, group_weight >> scale, tg->se[cpu]->load.weight, others_weight, weighted_cpuload(cpu), 
+        //                group_weight / (others_weight + 1));
+
+        return group_weight / (others_weight + 1);
+}
+static inline int try_to_balance_affine(struct task_struct *p)
 {
         int i; 
+        int selected_cpu = -1;
         struct sched_entity *se = &p->se;
         struct task_group *tg = se->cfs_rq->tg;
         cpumask_t balanced_cpus_allowed;
@@ -2561,7 +2577,7 @@ static inline void try_to_balance_affine(struct task_struct *p)
         unsigned long cur_total_weight = 0;
 
         if (tg->balsched_state == BALSCHED_STATE_DISABLED)
-                return;
+                return selected_cpu;
 
         cpus_clear(balanced_cpus_allowed);
         if (is_fair_balsched(tg)) {
@@ -2585,27 +2601,47 @@ static inline void try_to_balance_affine(struct task_struct *p)
                         cpus_setall(balanced_cpus_allowed);
                         affinity_updated = 1;
                 }
-                //printk("[DEBUG] allowed=%lx\n\n", balanced_cpus_allowed.bits[0]);
         }
-        else if ((tg->balsched == BALSCHED_VCPUS || tg->balsched == BALSCHED_VCPUS_FAIR) && se->is_vcpu && likely(!se->on_rq)) {
-                for_each_cpu(i, cpu_active_mask) {
-                        /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
-                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus &&
-                            !cause_load_imbalance(tg, i, se->load.weight, cur_total_weight)) {
-                                cpu_set(i, balanced_cpus_allowed);
+        else if ((tg->balsched == BALSCHED_VCPUS || tg->balsched == BALSCHED_VCPUS_FAIR) && likely(!se->on_rq)) {
+                /*
+                if (se->ipi_pending) {
+                        unsigned long weight_ratio, max_weight_ratio = 0;
+                        for_each_cpu(i, cpu_active_mask) {
+                                if (likely(tg->se[i] && tg->se[i]->my_q)) {
+                                        weight_ratio = group_weight_ratio(tg, i, se->load.weight);
+                                        if (weight_ratio > max_weight_ratio) {
+                                                max_weight_ratio = weight_ratio;
+                                                selected_cpu = i;
+                                        }
+                                }
+                        }
+                        if (selected_cpu >= 0) {
+                                cpus_setall(balanced_cpus_allowed);
                                 affinity_updated = 1;
+                                printk("[DEBUG]\tselected_cpu=%d\n", selected_cpu);
                         }
                 }
-                /* if no idle cpu exists, return the affinity to all cpus */
-                if (!affinity_updated) {
-                        cpus_setall(balanced_cpus_allowed);
-                        affinity_updated = 1;
-                        printk("[DEBUG] pid=%d allowed=%lx\n", p->pid, balanced_cpus_allowed.bits[0]);
+                else */if (se->is_vcpu) {
+                        for_each_cpu(i, cpu_active_mask) {
+                                /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
+                                if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus &&
+                                                !cause_load_imbalance(tg, i, se->load.weight, cur_total_weight)) {
+                                        cpu_set(i, balanced_cpus_allowed);
+                                        affinity_updated = 1;
+                                }
+                        }
+                        /* if no idle cpu exists, return the affinity to all cpus */
+                        if (!affinity_updated) {
+                                cpus_setall(balanced_cpus_allowed);
+                                affinity_updated = 1;
+                        }
                 }
         }
         /* if found, update affinity */
         if (affinity_updated)
                 p->cpus_allowed = balanced_cpus_allowed;
+
+        return selected_cpu;
 }
 #endif
 
@@ -2616,9 +2652,9 @@ static inline
 int select_task_rq(struct task_struct *p, int sd_flags, int wake_flags)
 {
 #ifdef CONFIG_BALANCE_SCHED
-        int cpu;
-        try_to_balance_affine(p);
-	cpu = p->sched_class->select_task_rq(p, sd_flags, wake_flags);
+        int cpu = try_to_balance_affine(p);
+        if (cpu < 0) 
+	        cpu = p->sched_class->select_task_rq(p, sd_flags, wake_flags);
 #else
 	int cpu = p->sched_class->select_task_rq(p, sd_flags, wake_flags);
 #endif
