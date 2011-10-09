@@ -437,6 +437,30 @@ TRACE_EVENT(sched_ipi_futex,
 	TP_printk("source_pid=%d (type=%d) -> target_pid=%d (type=%d)",
                 __entry->source_pid, __entry->source_type, __entry->target_pid, __entry->target_type)
 );
+
+TRACE_EVENT(sched_interactive_load,
+
+	TP_PROTO(int cpu, int is_this_cpu, s64 load, int interactive_count),
+
+	TP_ARGS(cpu, is_this_cpu, load, interactive_count),
+
+	TP_STRUCT__entry(
+		__field( int,   cpu                     )
+		__field( int,	is_this_cpu             )
+		__field( s64,	load                    )
+		__field( int,	interactive_count       )
+	),
+
+	TP_fast_assign(
+		__entry->cpu                    = cpu;
+                __entry->is_this_cpu            = is_this_cpu;
+		__entry->load                   = load;
+                __entry->interactive_count      = interactive_count;
+	),
+
+	TP_printk("cpu=%d is_this_cpu=%d load=%lld interactive_count=%d",
+                __entry->cpu, __entry->is_this_cpu, __entry->load, __entry->interactive_count)
+);
 #endif
 
 #endif /* _TRACE_SCHED_H */

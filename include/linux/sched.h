@@ -2733,6 +2733,11 @@ static inline unsigned long rlimit_max(unsigned int limit)
 extern void inc_tg_interactive_count(struct sched_entity *se);
 extern void dec_tg_interactive_count(struct sched_entity *se);
 extern void list_add_ipi_pending(struct task_struct *p);
+#if 0
+extern int cpu_has_interactive_vcpu(int cpu);
+#endif
+extern int get_interactive_count(int cpu);
+extern int find_interactiveless_cpu(int this_cpu, struct task_struct *p);
 #endif
 
 #endif /* __KERNEL__ */

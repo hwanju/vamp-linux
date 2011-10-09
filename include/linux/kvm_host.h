@@ -175,9 +175,6 @@ struct kvm_vcpu {
         volatile long state;
 	unsigned int flags;
 	unsigned long long prev_run_delay, run_delay; /* time spent waiting on a runqueue */
-
-        /* vcpu placement */
-        cpumask_t cpus_to_run;
 #endif
 
 	struct kvm_vcpu_arch arch;

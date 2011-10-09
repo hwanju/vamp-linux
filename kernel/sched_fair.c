@@ -394,7 +394,29 @@ static inline void dec_interactive_count(int cpu)
 {
         atomic_dec(&per_cpu(interactive_count, cpu));
 }
-#define get_interactive_count(cpu)      atomic_read(&per_cpu(interactive_count, (cpu)))
+int get_interactive_count(int cpu)
+{
+        return atomic_read(&per_cpu(interactive_count, cpu));
+}
+EXPORT_SYMBOL_GPL(get_interactive_count);
+#if 0
+int cpu_has_interactive_vcpu(int cpu)
+{
+        struct cfs_rq *cfs_rq;
+        struct rq *rq = cpu_rq(cpu);
+
+        rcu_read_lock();
+        for_each_leaf_cfs_rq(rq, cfs_rq) {
+                if (/*atomic_read(&cfs_rq->tg->interactive_count) &&*/ rq_has_interactive_vcpu(cfs_rq)) {
+                        rcu_read_unlock();
+                        return 1;
+                }
+        }
+        rcu_read_unlock();
+        return 0;
+}
+EXPORT_SYMBOL_GPL(cpu_has_interactive_vcpu);
+#endif
 #endif
 
 /*
@@ -730,12 +752,12 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
         }
 #endif
 #ifdef CONFIG_KVM_VDI
+#if 0
         if (!se->is_vcpu && atomic_read(&se->cfs_rq->tg->interactive_count))
                 se->vcpu_flags |= VF_INTERACTIVE;
-
-        if (se->vcpu_flags & (VF_INTERACTIVE | VF_NEWLY_INTERACTIVE)) {
-                se->vcpu_flags |= VF_INTERACTIVE;
-                se->vcpu_flags &= ~VF_NEWLY_INTERACTIVE;
+#endif
+        if (se->vcpu_flags & VF_INTERACTIVE) {
+                se->vcpu_flags |= VF_INTERACTIVE_ON_RQ;
                 inc_interactive_count(cpu_of(rq_of(cfs_rq)));
         }
 #endif
@@ -757,13 +779,14 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
                 cfs_rq->nr_running_vcpus--;
 #endif
 #ifdef CONFIG_KVM_VDI
-        if (se->vcpu_flags & (VF_INTERACTIVE | VF_NEWLY_NORMAL)) {
-                se->vcpu_flags &= ~VF_NEWLY_NORMAL;
+        if (se->vcpu_flags & VF_INTERACTIVE_ON_RQ) {
+                se->vcpu_flags &= ~VF_INTERACTIVE_ON_RQ;
                 dec_interactive_count(cpu_of(rq_of(cfs_rq)));
         }
+#if 0
         if (!se->is_vcpu && !atomic_read(&se->cfs_rq->tg->interactive_count))
                 se->vcpu_flags &= ~VF_INTERACTIVE;
-
+#endif
 #endif
 	cfs_rq->nr_running--;
 }

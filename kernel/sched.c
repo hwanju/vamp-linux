@@ -2551,6 +2551,38 @@ static inline int cause_load_imbalance(struct task_group *tg, int cpu,
 
         return cpu_load > weight_per_cpu;
 }
+int find_interactiveless_cpu(int this_cpu, struct task_struct *p)
+{
+        int i;
+        struct sched_entity *se = &p->se;
+        struct task_group *tg = se->cfs_rq->tg;
+        unsigned long weight = se->load.weight;
+        s64 this_load = weighted_cpuload(this_cpu);
+        s64 dest_load;
+        u64 min_load = -1UL;
+        int min_load_cpu = -1;
+
+        /* FIXME: assume a vcpu does not have mixed workloads currently */
+        if (atomic_read(&tg->interactive_count))
+                return -1;
+        
+        this_load += effective_load(tg, this_cpu, -weight, 0);
+        trace_sched_interactive_load(this_cpu, 1, this_load, get_interactive_count(this_cpu));
+
+        for_each_cpu(i, cpu_active_mask) {
+                if (i == this_cpu)
+                        continue;
+                dest_load = weighted_cpuload(i) + effective_load(tg, i, weight, 0);
+                if (dest_load < min_load && !get_interactive_count(i)) {
+                        min_load = dest_load;
+                        min_load_cpu = i;
+                }
+                trace_sched_interactive_load(i, 0, dest_load, get_interactive_count(i));
+        }
+        return min_load_cpu;
+}
+EXPORT_SYMBOL_GPL(find_interactiveless_cpu);
+
 static inline unsigned long group_weight_ratio(struct task_group *tg, int cpu, unsigned long weight)
 {
         unsigned int scale = 10;
@@ -2602,39 +2634,20 @@ static inline int try_to_balance_affine(struct task_struct *p)
                         affinity_updated = 1;
                 }
         }
-        else if ((tg->balsched == BALSCHED_VCPUS || tg->balsched == BALSCHED_VCPUS_FAIR) && likely(!se->on_rq)) {
-                /*
-                if (se->ipi_pending) {
-                        unsigned long weight_ratio, max_weight_ratio = 0;
-                        for_each_cpu(i, cpu_active_mask) {
-                                if (likely(tg->se[i] && tg->se[i]->my_q)) {
-                                        weight_ratio = group_weight_ratio(tg, i, se->load.weight);
-                                        if (weight_ratio > max_weight_ratio) {
-                                                max_weight_ratio = weight_ratio;
-                                                selected_cpu = i;
-                                        }
-                                }
-                        }
-                        if (selected_cpu >= 0) {
-                                cpus_setall(balanced_cpus_allowed);
+        else if ((tg->balsched == BALSCHED_VCPUS || tg->balsched == BALSCHED_VCPUS_FAIR) && likely(!se->on_rq) && se->is_vcpu) {
+                for_each_cpu(i, cpu_active_mask) {
+                        /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
+                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus &&
+                                        !cause_load_imbalance(tg, i, se->load.weight, cur_total_weight) &&
+                                        !get_interactive_count(i) /* EXPERIMENTAL */) {
+                                cpu_set(i, balanced_cpus_allowed);
                                 affinity_updated = 1;
-                                printk("[DEBUG]\tselected_cpu=%d\n", selected_cpu);
                         }
                 }
-                else */if (se->is_vcpu) {
-                        for_each_cpu(i, cpu_active_mask) {
-                                /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
-                                if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus &&
-                                                !cause_load_imbalance(tg, i, se->load.weight, cur_total_weight)) {
-                                        cpu_set(i, balanced_cpus_allowed);
-                                        affinity_updated = 1;
-                                }
-                        }
-                        /* if no idle cpu exists, return the affinity to all cpus */
-                        if (!affinity_updated) {
-                                cpus_setall(balanced_cpus_allowed);
-                                affinity_updated = 1;
-                        }
+                /* if no idle cpu exists, return the affinity to all cpus */
+                if (!affinity_updated) {
+                        cpus_setall(balanced_cpus_allowed);
+                        affinity_updated = 1;
                 }
         }
         /* if found, update affinity */

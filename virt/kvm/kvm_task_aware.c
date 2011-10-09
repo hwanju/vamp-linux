@@ -227,7 +227,7 @@ static void load_timer_handler(unsigned long data)
         int i, vidx, bidx;
         unsigned long long now = sched_clock();
         unsigned long long run_delay;
-        int se_vcpu_flags[KVM_MAX_VCPUS];       /* shadow copy of vcpu flags for se */
+        //int se_vcpu_flags[KVM_MAX_VCPUS];       /* shadow copy of vcpu flags for se */
 
         /* TO BE DEPRECATED!!! temporal */
         //unsigned int __start_load_idx = kvm->monitor_seqnum == 0 ? /* first */
@@ -238,6 +238,7 @@ static void load_timer_handler(unsigned long data)
 
         u64 cur_cpu_load_avg; 
         s64 delta_load_pct;
+        int nr_interactive_vcpus = 0;
 
         BUG_ON(!kvm);
 
@@ -289,7 +290,6 @@ static void load_timer_handler(unsigned long data)
         /* check vcpu load history */
         kvm_for_each_vcpu(vidx, vcpu, kvm) {
                 run_delay = vcpu->run_delay - vcpu->prev_run_delay;
-                se_vcpu_flags[vidx] = 0;
 
                 /* we are interested in vcpus that have been scheduled since load timer started */
                 if (!valid_load_entity(kvm, vcpu))
@@ -302,15 +302,11 @@ static void load_timer_handler(unsigned long data)
 
                 /* if load surge after a user event is sufficiently large, consider this vcpu as interective */
                 if (delta_load_pct >= load_delta_thresh_pct) {
-                        if (!(vcpu->flags & VF_INTERACTIVE))
-                                se_vcpu_flags[vidx] |= VF_NEWLY_INTERACTIVE;
                         vcpu->flags |= VF_INTERACTIVE;
+                        nr_interactive_vcpus++;
                 }
-                else {
-                        if (vcpu->flags & VF_INTERACTIVE)
-                                se_vcpu_flags[vidx] |= VF_NEWLY_NORMAL;
+                else
                         vcpu->flags &= ~VF_INTERACTIVE;
-                }
 
                 trace_kvm_vcpu_run_delay(kvm->vm_id, vcpu->vcpu_id, run_delay, delta_load_pct, vcpu->flags);
         }
@@ -354,15 +350,29 @@ static void load_timer_handler(unsigned long data)
                 rcu_read_unlock();
                 if (task) {
                         /* copy flags to kernel-side entity */
-                        task->se.vcpu_flags = se_vcpu_flags[vidx];
-                        if (se_vcpu_flags[vidx] & VF_NEWLY_INTERACTIVE)
-                                inc_tg_interactive_count(&task->se);
-                        else if (se_vcpu_flags[vidx] & VF_NEWLY_NORMAL)
-                                dec_tg_interactive_count(&task->se);
+                        if (vcpu->flags & VF_INTERACTIVE) {
+                                if (!(task->se.vcpu_flags & VF_INTERACTIVE))
+                                        inc_tg_interactive_count(&task->se);
+                                task->se.vcpu_flags |= VF_INTERACTIVE;
+                        }
+                        else {
+                                if (task->se.vcpu_flags & VF_INTERACTIVE)
+                                        dec_tg_interactive_count(&task->se);
+                                task->se.vcpu_flags &= ~VF_INTERACTIVE;
+                        }
                         put_task_struct(task);
                 }
         }
 
+        if (nr_interactive_vcpus) {
+                kvm->monitor_seqnum++;
+                mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(240));   /* FIXME: 240 */
+        }
+        else {
+                trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
+                kvm->monitor_seqnum = 0;
+        }
+#if 0
         /****************TEST****************/
         kvm->monitor_seqnum++;
         if (kvm->monitor_seqnum < 20) {
@@ -374,6 +384,7 @@ static void load_timer_handler(unsigned long data)
                 kvm->monitor_seqnum = 0;
         }
         /************************************/
+#endif
 }
 
 static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, unsigned long long now)
@@ -480,6 +491,7 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 #endif
         struct guest_thread_info *cur_guest_thread;
         unsigned long long now = sched_clock();
+        int interactive_friendly_cpu;
 
         /* run_delay (wait time) accounting */
         if (vcpu->state == VCPU_WAITING)
@@ -495,6 +507,18 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 
         trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
                         vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
+
+#if 0
+        if (get_interactive_count(cpu) && !(vcpu->flags & VF_INTERACTIVE)) {
+                cpumask_t cpus_to_run;
+                interactive_friendly_cpu = find_interactiveless_cpu(cpu, current);
+                if (interactive_friendly_cpu >= 0) {
+                        cpus_setall(cpus_to_run);
+                        cpu_clear(vcpu->cpu, cpus_to_run);
+                        set_cpus_allowed_ptr(current, &cpus_to_run);
+                }
+        }
+#endif
 
 #if 0   /* VLP disabled */
         /* vlp measure: check if this vcpu has been blocked */
