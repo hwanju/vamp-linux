@@ -21,6 +21,9 @@
 #define tadebug(args...)
 #endif
 
+static unsigned int __read_mostly load_monitor_enabled = 1;
+module_param(load_monitor_enabled, uint, S_IRUGO);      /* read-only: not updatable during runtime */
+
 /*
  * check_load_epoch() updates load_epoch_id and initializes cpu_loads[new_epoch_id],
  * when new load epoch begins at arrival time (entity would be vcpu or guest_thread).
@@ -366,6 +369,7 @@ static void load_timer_handler(unsigned long data)
 
         if (nr_interactive_vcpus) {
                 kvm->monitor_seqnum++;
+                kvm->monitor_timestamp = now;
                 mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(240));   /* FIXME: 240 */
         }
         else {
@@ -422,6 +426,9 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
         struct kvm *kvm = vcpu->kvm;
         struct guest_thread_info *prev, *next;
         unsigned long long now;
+
+        if (!load_monitor_enabled)
+                return;
 
         guest_task = find_and_alloc_guest_task(kvm, guest_task_id);
         if (!guest_task) {      /* not exist */
@@ -491,7 +498,6 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 #endif
         struct guest_thread_info *cur_guest_thread;
         unsigned long long now = sched_clock();
-        int interactive_friendly_cpu;
 
         /* run_delay (wait time) accounting */
         if (vcpu->state == VCPU_WAITING)
@@ -583,6 +589,8 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
  */
 void init_task_aware_vcpu(struct kvm_vcpu *vcpu)
 {
+        if (!load_monitor_enabled)
+                return;
 	preempt_notifier_init(&vcpu->acct_preempt_notifier, &acct_preempt_ops);
         preempt_notifier_register(&vcpu->acct_preempt_notifier);
 }
@@ -593,6 +601,8 @@ EXPORT_SYMBOL_GPL(init_task_aware_vcpu);
  */
 void destroy_task_aware_vcpu(struct kvm_vcpu *vcpu)
 {
+        if (!load_monitor_enabled)
+                return;
         preempt_notifier_unregister(&vcpu->acct_preempt_notifier);
 }
 EXPORT_SYMBOL_GPL(destroy_task_aware_vcpu);
@@ -602,6 +612,8 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int du
 #if 0   /* VLP disabled */
         start_vlp_monitor(kvm, now);
 #endif
+        if (!load_monitor_enabled)
+                return;
         
         if (!timer_pending(&kvm->load_timer)) {
                 int vidx;
@@ -623,6 +635,8 @@ EXPORT_SYMBOL_GPL(start_load_monitor);
 void init_kvm_load_monitor(struct kvm *kvm)
 {
         int i;
+        if (!load_monitor_enabled)
+                return;
         /* guest task hash */
         for (i = 0; i < GUEST_TASK_HASH_HEADS; i++)
                 INIT_HLIST_HEAD(&kvm->guest_task_hash[i]);
@@ -652,6 +666,8 @@ void exit_kvm_load_monitor(struct kvm *kvm)
         struct hlist_node *node, *tmp;
         struct guest_task_struct *guest_task;
 
+        if (!load_monitor_enabled)
+                return;
         spin_lock(&kvm->guest_task_lock);
         for (i = 0; i < GUEST_TASK_HASH_HEADS; i++) {
                 hlist_for_each_entry_safe(guest_task, node, tmp, &kvm->guest_task_hash[i], link) {
@@ -673,6 +689,9 @@ EXPORT_SYMBOL_GPL(exit_kvm_load_monitor);
  */
 int init_task_aware_agent(void)
 {
+        if (!load_monitor_enabled)
+                return -1;
+
         BUG_ON(guest_task_cache);
         guest_task_cache = kmem_cache_create("guest_task_struct", 
                                              sizeof(struct guest_task_struct), 
@@ -697,6 +716,9 @@ EXPORT_SYMBOL_GPL(init_task_aware_agent);
  */
 void destroy_task_aware_agent(void)
 {
+        if (!load_monitor_enabled)
+                return;
+
         kmem_cache_destroy(guest_task_cache);
         printk(KERN_INFO "kvm-ta: destroying slab for guest_task_struct\n" );
 }

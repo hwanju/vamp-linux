@@ -2226,8 +2226,7 @@ int can_migrate_task(struct task_struct *p, struct rq *rq, int this_cpu,
 	 */
 	if (!cpumask_test_cpu(this_cpu, &p->cpus_allowed)) {
 #ifdef CONFIG_BALANCE_SCHED
-                if (p->se.cfs_rq->tg->balsched == BALSCHED_ALL_FAIR || 
-                    p->se.cfs_rq->tg->balsched == BALSCHED_VCPUS_FAIR) {
+                if (is_fair_balsched(p->se.cfs_rq->tg) && !get_interactive_count(this_cpu) /* EXPERIMENTAL */) {
                         soft_affinity = 1;
                         goto skip_affinity_violation;
                 }

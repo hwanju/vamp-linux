@@ -2635,6 +2635,7 @@ static inline int try_to_balance_affine(struct task_struct *p)
                 }
         }
         else if ((tg->balsched == BALSCHED_VCPUS || tg->balsched == BALSCHED_VCPUS_FAIR) && likely(!se->on_rq) && se->is_vcpu) {
+                //int debug = 0;      /* DEBUG */
                 for_each_cpu(i, cpu_active_mask) {
                         /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
                         if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus &&
@@ -2643,12 +2644,18 @@ static inline int try_to_balance_affine(struct task_struct *p)
                                 cpu_set(i, balanced_cpus_allowed);
                                 affinity_updated = 1;
                         }
+                        //if (get_interactive_count(i)) {
+                        //        printk( "[DEBUG] cpu%d: icnt=%d\n", i, get_interactive_count(i) );
+                        //        debug = 1;
+                        //}
                 }
                 /* if no idle cpu exists, return the affinity to all cpus */
                 if (!affinity_updated) {
                         cpus_setall(balanced_cpus_allowed);
                         affinity_updated = 1;
                 }
+                //if (debug)
+                //        printk( "[DEBUG]  --> %lx\n", balanced_cpus_allowed.bits[0] );
         }
         /* if found, update affinity */
         if (affinity_updated)
