@@ -310,9 +310,9 @@ struct kvm {
         struct hlist_head guest_task_hash[GUEST_TASK_HASH_HEADS];
         spinlock_t guest_task_lock;
         struct timer_list load_timer;
-        u64 load_timer_start_time;
         u64 monitor_timestamp;
         int monitor_seqnum;
+        unsigned int monitor_interval_in_msec;
 
         /* VLP: VCPU-level Parallelism */
         int vlp;                /* current vlp */

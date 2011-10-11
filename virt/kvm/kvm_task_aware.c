@@ -370,7 +370,7 @@ static void load_timer_handler(unsigned long data)
         if (nr_interactive_vcpus) {
                 kvm->monitor_seqnum++;
                 kvm->monitor_timestamp = now;
-                mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(240));   /* FIXME: 240 */
+                mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(kvm->monitor_interval_in_msec));
         }
         else {
                 trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
@@ -621,8 +621,8 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int du
 
                 kvm_for_each_vcpu(vidx, vcpu, kvm)
                         vcpu->prev_run_delay = vcpu->run_delay;
-                kvm->load_timer_start_time = now;
                 kvm->monitor_timestamp = now;
+                kvm->monitor_interval_in_msec = duration_in_msec;
                 mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(duration_in_msec));
         }
 }
