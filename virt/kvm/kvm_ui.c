@@ -4,7 +4,7 @@
 #include <linux/kvm_task_aware.h>
 #include <linux/kvm_ui.h>
 
-#define DEFAULT_UI_MONITOR_MSEC         120
+#define DEFAULT_UI_MONITOR_MSEC         240
 static unsigned int ui_monitor_msec = DEFAULT_UI_MONITOR_MSEC;
 module_param(ui_monitor_msec, uint, 0644);
 

@@ -2070,8 +2070,9 @@ void dec_tg_interactive_count(struct sched_entity *se)
 EXPORT_SYMBOL_GPL(dec_tg_interactive_count);
 
 /* hwandori-experimental: below two functions - FIXME: -> static */
-unsigned int __read_mostly sysctl_kvm_ipi_first    = 1;
+unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
 unsigned int __read_mostly sysctl_kvm_ipi_indirect = 0;
+unsigned int __read_mostly sysctl_balsched_vdi_opt = 0;
 
 #include <linux/futex.h>
 
@@ -2634,14 +2635,41 @@ static inline int try_to_balance_affine(struct task_struct *p)
                         affinity_updated = 1;
                 }
         }
-        else if ((tg->balsched == BALSCHED_VCPUS || tg->balsched == BALSCHED_VCPUS_FAIR) && likely(!se->on_rq) && se->is_vcpu) {
+        else if (tg->balsched == BALSCHED_VCPUS && likely(!se->on_rq) && se->is_vcpu) {
                 for_each_cpu(i, cpu_active_mask) {
                         /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
-                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus &&
-                                        !cause_load_imbalance(tg, i, se->load.weight, cur_total_weight) &&
-                                        !get_interactive_count(i) /* EXPERIMENTAL */) {
+                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus) {
                                 cpu_set(i, balanced_cpus_allowed);
                                 affinity_updated = 1;
+                        }
+                }
+                /* if no idle cpu exists, return the affinity to all cpus */
+                if (!affinity_updated) {
+                        cpus_setall(balanced_cpus_allowed);
+                        affinity_updated = 1;
+                }
+        }
+        else if (tg->balsched == BALSCHED_VCPUS_FAIR && likely(!se->on_rq)) {
+                if (se->is_vcpu && !atomic_read(&tg->interactive_count)) {
+                        for_each_cpu(i, cpu_active_mask) {
+                                /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
+                                if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus &&
+                                                !cause_load_imbalance(tg, i, se->load.weight, cur_total_weight) &&
+                                                !get_interactive_count(i)) {
+                                        cpu_set(i, balanced_cpus_allowed);
+                                        affinity_updated = 1;
+                                }
+                        }
+                }
+                else if (sysctl_balsched_vdi_opt &&     /* EXPERIMENTAL */
+                         atomic_read(&tg->interactive_count) && (!se->is_vcpu || !(se->vcpu_flags & VF_INTERACTIVE))) {
+                        unsigned long gw_ratio, max_gw_ratio = 0;
+                        for_each_cpu(i, cpu_active_mask) {
+                                gw_ratio = group_weight_ratio(tg, i, se->load.weight);
+                                if (gw_ratio > max_gw_ratio) {
+                                        max_gw_ratio = gw_ratio;
+                                        selected_cpu = i;
+                                }
                         }
                 }
                 /* if no idle cpu exists, return the affinity to all cpus */

@@ -2028,6 +2028,7 @@ extern unsigned int sysctl_kvm_ipi_first;
 extern unsigned int sysctl_kvm_ipi_indirect;
 extern unsigned int sysctl_sched_interactive_preempt;
 extern unsigned int sysctl_sched_aggressive_load;
+extern unsigned int sysctl_balsched_vdi_opt;
 #endif
 extern unsigned int sysctl_sched_rt_period;
 extern int sysctl_sched_rt_runtime;

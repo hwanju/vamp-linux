@@ -89,7 +89,7 @@ const_debug unsigned int sysctl_sched_migration_cost = 500000UL;
  */
 unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
 #ifdef CONFIG_KVM_VDI
-unsigned int __read_mostly sysctl_sched_interactive_preempt = 1;
+unsigned int __read_mostly sysctl_sched_interactive_preempt = 0;
 unsigned int __read_mostly sysctl_sched_aggressive_load = 0;
 #endif
 
