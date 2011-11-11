@@ -354,7 +354,7 @@ TRACE_EVENT(kvm_gthread_switch,
 		__entry->cpu_load       = cpu_load;
 	),
 
-	TP_printk("%s gtid=%lx v%d load_idx=%u cpu_load=%llu", __entry->op ? "arrive" : "depart", 
+	TP_printk("%s gtid=%05lx v%d load_idx=%u cpu_load=%llu", __entry->op ? "arrive" : "depart", 
                   __entry->guest_task_id, __entry->vcpu_id, __entry->load_idx, __entry->cpu_load)
 );
 #define trace_kvm_gthread_switch_arrive(guest_task_id, vcpu_id, load_idx, cpu_load) \
@@ -412,28 +412,35 @@ TRACE_EVENT(kvm_load_check,
 #define trace_kvm_load_check_exit(vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)     \
         trace_kvm_load_check(0, vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)
 
-TRACE_EVENT(kvm_vcpu_run_delay,
-	TP_PROTO(int vm_id, int vcpu_id, u64 run_delay, s64 delta_load_pct, unsigned int flags),
-	TP_ARGS(vm_id, vcpu_id, run_delay, delta_load_pct, flags),
+TRACE_EVENT(kvm_vcpu_stat,
+	TP_PROTO(int vm_id, int vcpu_id, u64 run_delay, int nr_background_vcpus, unsigned int prev_cpu_load, unsigned int cpu_load, unsigned int reactive_gthread_load, unsigned int flags),
+	TP_ARGS(vm_id, vcpu_id, run_delay, nr_background_vcpus, prev_cpu_load, cpu_load, reactive_gthread_load, flags),
 
 	TP_STRUCT__entry(
-		__field(	int,            vm_id           )
-		__field(	int,            vcpu_id         )
-		__field(	u64,	        run_delay       )
-		__field(	s64,	        delta_load_pct  )
-		__field(	unsigned int,   flags           )
+		__field(	int,            vm_id                   )
+		__field(	int,            vcpu_id                 )
+		__field(	u64,	        run_delay               )
+		__field(	int,            nr_background_vcpus     )
+		__field(	unsigned int,   prev_cpu_load           )
+		__field(	unsigned int,   cpu_load                )
+		__field(	unsigned int,   reactive_gthread_load   )
+		__field(	unsigned int,   flags                   )
 	),
 
 	TP_fast_assign(
-                __entry->vm_id          = vm_id;
-                __entry->vcpu_id        = vcpu_id;
-		__entry->run_delay      = run_delay;
-		__entry->delta_load_pct = delta_load_pct;
-                __entry->flags          = flags;
+                __entry->vm_id                  = vm_id;
+                __entry->vcpu_id                = vcpu_id;
+                __entry->nr_background_vcpus    = nr_background_vcpus;
+		__entry->run_delay              = run_delay;
+		__entry->prev_cpu_load          = prev_cpu_load;
+		__entry->cpu_load               = cpu_load;
+		__entry->reactive_gthread_load  = reactive_gthread_load;
+                __entry->flags                  = flags;
 	),
 
-	TP_printk("vm%d v%d run_delay=%llu delta_load_pct=%lld flags=%x", 
-                __entry->vm_id, __entry->vcpu_id, __entry->run_delay, __entry->delta_load_pct, __entry->flags)
+	TP_printk("vm%d v%d run_delay=%llu nr_background_vcpus=%d prev_cpu_load=%u cpu_load=%u reactive_gthread_load=%u flags=%u", 
+                        __entry->vm_id, __entry->vcpu_id, __entry->run_delay, __entry->nr_background_vcpus,
+                        __entry->prev_cpu_load, __entry->cpu_load, __entry->reactive_gthread_load, __entry->flags)
 );
 
 TRACE_EVENT(kvm_vcpu_load,
@@ -461,8 +468,8 @@ TRACE_EVENT(kvm_vcpu_load,
 );
 
 TRACE_EVENT(kvm_gthread_load,
-	TP_PROTO(int vm_id, unsigned long guest_task_id, int vcpu_id, unsigned int cur_load_idx, unsigned int load_idx, u64 cpu_load),
-	TP_ARGS(vm_id, guest_task_id, vcpu_id, cur_load_idx, load_idx, cpu_load),
+	TP_PROTO(int vm_id, unsigned long guest_task_id, int vcpu_id, unsigned int cur_load_idx, unsigned int load_idx, u64 cpu_load, unsigned int flags),
+	TP_ARGS(vm_id, guest_task_id, vcpu_id, cur_load_idx, load_idx, cpu_load, flags),
 
 	TP_STRUCT__entry(
 		__field(	int,            vm_id           )
@@ -471,6 +478,7 @@ TRACE_EVENT(kvm_gthread_load,
 		__field(	unsigned int,   cur_load_idx    )
 		__field(	unsigned int,   load_idx        )
 		__field(	u64,	        cpu_load        )
+		__field(	unsigned int,   flags           )
 	),
 
 	TP_fast_assign(
@@ -480,10 +488,11 @@ TRACE_EVENT(kvm_gthread_load,
 		__entry->cur_load_idx   = cur_load_idx;
 		__entry->load_idx       = load_idx;
 		__entry->cpu_load       = cpu_load;
+		__entry->flags          = flags;
 	),
 
-	TP_printk("vm%d v%d gtid=%lx cur_load_idx=%u load_idx=%u cpu_load=%llu", __entry->vm_id, __entry->vcpu_id, 
-                        __entry->guest_task_id, __entry->cur_load_idx, __entry->load_idx, __entry->cpu_load)
+	TP_printk("vm%d v%d gtid=%05lx cur_load_idx=%u load_idx=%u cpu_load=%llu flags=%u", __entry->vm_id, __entry->vcpu_id, 
+                        __entry->guest_task_id, __entry->cur_load_idx, __entry->load_idx, __entry->cpu_load, __entry->flags)
 );
 
 TRACE_EVENT(kvm_vlp,

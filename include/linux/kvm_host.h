@@ -169,12 +169,14 @@ struct kvm_vcpu {
         /* preserving the past cpu loads as well as the current one
            indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
         u64 cpu_loads[NR_LOAD_ENTRIES];
-        u64 prev_cpu_load_avg;
+        unsigned int prev_cpu_load_avg, cpu_load_avg;   /* in percentage (0-100) */
 
-        /* run_delay & vlp tracking */
+        /* vcpu stat */
         volatile long state;
 	unsigned int flags;
-	unsigned long long prev_run_delay, run_delay; /* time spent waiting on a runqueue */
+        /* time spent waiting on a runqueue */
+	unsigned long long pre_monitor_run_delay, prev_run_delay, run_delay;
+        unsigned int reactive_gthread_load;             /* accumulated load of increased guest threads */
 #endif
 
 	struct kvm_vcpu_arch arch;
