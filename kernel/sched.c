@@ -293,7 +293,7 @@ struct task_group {
 #endif
 
 #ifdef CONFIG_KVM_VDI
-        atomic_t interactive_count;
+        int interactive_phase;
 #endif
 };
 
@@ -2055,19 +2055,19 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
 
 #ifdef CONFIG_KVM_VDI
-void inc_tg_interactive_count(struct sched_entity *se)
+void set_interactive_phase(struct sched_entity *se)
 {
         if (likely(se && se->cfs_rq))
-                atomic_inc(&se->cfs_rq->tg->interactive_count);
+                se->cfs_rq->tg->interactive_phase = 1;
 }
-EXPORT_SYMBOL_GPL(inc_tg_interactive_count);
+EXPORT_SYMBOL_GPL(set_interactive_phase);
 
-void dec_tg_interactive_count(struct sched_entity *se)
+void clear_interactive_phase(struct sched_entity *se)
 {
         if (likely(se && se->cfs_rq))
-                atomic_dec(&se->cfs_rq->tg->interactive_count);
+                se->cfs_rq->tg->interactive_phase = 0;
 }
-EXPORT_SYMBOL_GPL(dec_tg_interactive_count);
+EXPORT_SYMBOL_GPL(clear_interactive_phase);
 
 /* hwandori-experimental: below two functions - FIXME: -> static */
 unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
@@ -2564,7 +2564,7 @@ int find_interactiveless_cpu(int this_cpu, struct task_struct *p)
         int min_load_cpu = -1;
 
         /* FIXME: assume a vcpu does not have mixed workloads currently */
-        if (atomic_read(&tg->interactive_count))
+        if (tg->interactive_phase)
                 return -1;
         
         this_load += effective_load(tg, this_cpu, -weight, 0);
@@ -2650,7 +2650,7 @@ static inline int try_to_balance_affine(struct task_struct *p)
                 }
         }
         else if (tg->balsched == BALSCHED_VCPUS_FAIR && likely(!se->on_rq)) {
-                if (se->is_vcpu && !atomic_read(&tg->interactive_count)) {
+                if (se->is_vcpu && !tg->interactive_phase) {
                         for_each_cpu(i, cpu_active_mask) {
                                 /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
                                 if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus &&
@@ -2662,7 +2662,7 @@ static inline int try_to_balance_affine(struct task_struct *p)
                         }
                 }
                 else if (sysctl_balsched_vdi_opt &&     /* EXPERIMENTAL */
-                         atomic_read(&tg->interactive_count) && (!se->is_vcpu || !(se->vcpu_flags & VF_INTERACTIVE))) {
+                         tg->interactive_phase && (!se->is_vcpu || !(se->vcpu_flags & VF_INTERACTIVE))) {
                         unsigned long gw_ratio, max_gw_ratio = 0;
                         for_each_cpu(i, cpu_active_mask) {
                                 gw_ratio = group_weight_ratio(tg, i, se->load.weight);

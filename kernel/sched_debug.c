@@ -214,8 +214,8 @@ void print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq)
 			atomic_read(&cfs_rq->tg->load_weight));
 #endif
 #ifdef CONFIG_KVM_VDI
-	SEQ_printf(m, "  .%-30s: %d\n", "interactive_count",
-			atomic_read(&cfs_rq->tg->interactive_count));
+	SEQ_printf(m, "  .%-30s: %d\n", "interactive_phase",
+			cfs_rq->tg->interactive_phase);
 #endif
 
 	print_cfs_group_stats(m, cpu, cfs_rq->tg);
@@ -306,6 +306,10 @@ static void print_cpu(struct seq_file *m, int cpu)
 	spin_lock_irqsave(&sched_debug_lock, flags);
 	print_cfs_stats(m, cpu);
 	print_rt_stats(m, cpu);
+#ifdef CONFIG_KVM_VDI
+	SEQ_printf(m, "  .%-30s: %d\n", "interactive_count",
+		   get_interactive_count(cpu));
+#endif
 
 	rcu_read_lock();
 	print_rq(m, rq, cpu);

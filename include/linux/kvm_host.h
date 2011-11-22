@@ -313,7 +313,7 @@ struct kvm {
         spinlock_t guest_task_lock;
         struct timer_list load_timer;
         u64 monitor_timestamp;
-        int monitor_seqnum;
+        int monitor_seqnum, last_interactive_seqnum;
         unsigned int monitor_interval_in_msec;
 
         /* VLP: VCPU-level Parallelism */
