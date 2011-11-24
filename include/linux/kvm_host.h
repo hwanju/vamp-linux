@@ -169,7 +169,7 @@ struct kvm_vcpu {
         /* preserving the past cpu loads as well as the current one
            indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
         u64 cpu_loads[NR_LOAD_ENTRIES];
-        unsigned int prev_cpu_load_avg, cpu_load_avg;   /* in percentage (0-100) */
+        ////unsigned int prev_cpu_load_avg, cpu_load_avg;   /* in percentage (0-100) */
 
         /* vcpu stat */
         volatile long state;
@@ -316,6 +316,11 @@ struct kvm {
         int monitor_seqnum, last_interactive_seqnum;
         unsigned int monitor_interval_in_msec;
 
+        unsigned int pre_monitor_load;          /* aggregate vcpu load during pre-monitoring period */
+        int interactive_phase;                  /* 0: normal phase, NON_MIXED_INTERACTIVE_PHASE: fast path, 
+                                                   MIXED_INTERACTIVE_PHASE: slow path */
+
+#if 0
         /* VLP: VCPU-level Parallelism */
         int vlp;                /* current vlp */
         u64 vlp_avg;            /* sum of (vlp * period) during vlp measure period */
@@ -323,6 +328,7 @@ struct kvm {
         u64 vlp_timestamp;      /* timestamp at which vlp was changed */
         cpumask_t vlp_vcpus;    /* vcpus for which vlp is accounted */
         spinlock_t vlp_lock;
+#endif
 
         pid_t vm_id;    /* for tracing (non-mandatory) */
 #endif

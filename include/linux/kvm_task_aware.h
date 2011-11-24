@@ -47,12 +47,12 @@ struct guest_thread_info {
         unsigned long long last_arrival;
         unsigned long long load_epoch_id;       
         unsigned long long cpu_loads[NR_LOAD_ENTRIES];
-        unsigned int prev_cpu_load_avg;
 };
 
 struct guest_task_struct {
         struct hlist_node link;
         unsigned long id;
+        unsigned int pre_monitor_load;  /* aggregate guest thread load (in pct) during pre-monitoring period */
 	unsigned int flags;
         struct guest_thread_info threads[MAX_GUEST_TASK_VCPU];
 };

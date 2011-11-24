@@ -413,34 +413,25 @@ TRACE_EVENT(kvm_load_check,
         trace_kvm_load_check(0, vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)
 
 TRACE_EVENT(kvm_vcpu_stat,
-	TP_PROTO(int vm_id, int vcpu_id, u64 run_delay, int nr_background_vcpus, unsigned int prev_cpu_load, unsigned int cpu_load, unsigned int reactive_gthread_load, unsigned int flags),
-	TP_ARGS(vm_id, vcpu_id, run_delay, nr_background_vcpus, prev_cpu_load, cpu_load, reactive_gthread_load, flags),
+	TP_PROTO(int vm_id, int vcpu_id, u64 run_delay, unsigned int flags),
+	TP_ARGS(vm_id, vcpu_id, run_delay, flags),
 
 	TP_STRUCT__entry(
 		__field(	int,            vm_id                   )
 		__field(	int,            vcpu_id                 )
 		__field(	u64,	        run_delay               )
-		__field(	int,            nr_background_vcpus     )
-		__field(	unsigned int,   prev_cpu_load           )
-		__field(	unsigned int,   cpu_load                )
-		__field(	unsigned int,   reactive_gthread_load   )
 		__field(	unsigned int,   flags                   )
 	),
 
 	TP_fast_assign(
                 __entry->vm_id                  = vm_id;
                 __entry->vcpu_id                = vcpu_id;
-                __entry->nr_background_vcpus    = nr_background_vcpus;
 		__entry->run_delay              = run_delay;
-		__entry->prev_cpu_load          = prev_cpu_load;
-		__entry->cpu_load               = cpu_load;
-		__entry->reactive_gthread_load  = reactive_gthread_load;
                 __entry->flags                  = flags;
 	),
 
-	TP_printk("vm%d v%d run_delay=%llu nr_background_vcpus=%d prev_cpu_load=%u cpu_load=%u reactive_gthread_load=%u flags=%u", 
-                        __entry->vm_id, __entry->vcpu_id, __entry->run_delay, __entry->nr_background_vcpus,
-                        __entry->prev_cpu_load, __entry->cpu_load, __entry->reactive_gthread_load, __entry->flags)
+	TP_printk("vm%d v%d run_delay=%llu flags=%u", 
+                        __entry->vm_id, __entry->vcpu_id, __entry->run_delay, __entry->flags)
 );
 
 TRACE_EVENT(kvm_vcpu_load,
@@ -468,8 +459,8 @@ TRACE_EVENT(kvm_vcpu_load,
 );
 
 TRACE_EVENT(kvm_gthread_load,
-	TP_PROTO(int vm_id, unsigned long guest_task_id, int vcpu_id, unsigned int cur_load_idx, unsigned int load_idx, u64 cpu_load, unsigned int flags),
-	TP_ARGS(vm_id, guest_task_id, vcpu_id, cur_load_idx, load_idx, cpu_load, flags),
+	TP_PROTO(int vm_id, unsigned long guest_task_id, int vcpu_id, unsigned int cur_load_idx, unsigned int load_idx, u64 cpu_load),
+	TP_ARGS(vm_id, guest_task_id, vcpu_id, cur_load_idx, load_idx, cpu_load),
 
 	TP_STRUCT__entry(
 		__field(	int,            vm_id           )
@@ -478,7 +469,6 @@ TRACE_EVENT(kvm_gthread_load,
 		__field(	unsigned int,   cur_load_idx    )
 		__field(	unsigned int,   load_idx        )
 		__field(	u64,	        cpu_load        )
-		__field(	unsigned int,   flags           )
 	),
 
 	TP_fast_assign(
@@ -488,11 +478,63 @@ TRACE_EVENT(kvm_gthread_load,
 		__entry->cur_load_idx   = cur_load_idx;
 		__entry->load_idx       = load_idx;
 		__entry->cpu_load       = cpu_load;
-		__entry->flags          = flags;
 	),
 
-	TP_printk("vm%d v%d gtid=%05lx cur_load_idx=%u load_idx=%u cpu_load=%llu flags=%u", __entry->vm_id, __entry->vcpu_id, 
-                        __entry->guest_task_id, __entry->cur_load_idx, __entry->load_idx, __entry->cpu_load, __entry->flags)
+	TP_printk("vm%d v%d gtid=%05lx cur_load_idx=%u load_idx=%u cpu_load=%llu", __entry->vm_id, __entry->vcpu_id, 
+                        __entry->guest_task_id, __entry->cur_load_idx, __entry->load_idx, __entry->cpu_load)
+);
+
+TRACE_EVENT(kvm_load_info,
+	TP_PROTO(struct kvm *kvm, unsigned int cur_vm_load, unsigned int reactive_gtask_load),
+	TP_ARGS(kvm, cur_vm_load, reactive_gtask_load),
+
+	TP_STRUCT__entry(
+		__field(	int,            vm_id                   )
+		__field(	int,            monitor_seqnum          )
+		__field(	int,            last_interactive_seqnum )
+		__field(	int,            interactive_phase       )
+		__field(	unsigned int,   pre_monitor_load        )
+		__field(	unsigned int,	cur_vm_load             )
+		__field(	unsigned int,	reactive_gtask_load     )
+	),
+
+	TP_fast_assign(
+                __entry->vm_id                  = kvm->vm_id;
+                __entry->monitor_seqnum         = kvm->monitor_seqnum;
+                __entry->last_interactive_seqnum= kvm->last_interactive_seqnum;
+                __entry->interactive_phase      = kvm->interactive_phase;
+                __entry->pre_monitor_load       = kvm->pre_monitor_load;
+                __entry->cur_vm_load            = cur_vm_load;
+                __entry->reactive_gtask_load    = reactive_gtask_load;
+	),
+
+	TP_printk("vm%d sn=%d lastsn=%d interactive_phase=%d pre_monitor_load=%u cur_vm_load=%u reactive_gtask_load=%u",
+                        __entry->vm_id, __entry->monitor_seqnum, __entry->last_interactive_seqnum, __entry->interactive_phase,
+                        __entry->pre_monitor_load, __entry->cur_vm_load, __entry->reactive_gtask_load)
+);
+
+TRACE_EVENT(kvm_gtask_stat,
+	TP_PROTO(int vm_id, int interactive_phase, unsigned long guest_task_id, unsigned int cpu_load, unsigned int flags),
+	TP_ARGS(vm_id, interactive_phase, guest_task_id, cpu_load, flags),
+
+	TP_STRUCT__entry(
+		__field(	int,            vm_id                   )
+		__field(	int,            interactive_phase       )
+		__field(	unsigned long,  guest_task_id           )
+		__field(	unsigned int,   cpu_load                )
+		__field(	unsigned int,   flags                   )
+	),
+
+	TP_fast_assign(
+                __entry->vm_id                  = vm_id;
+                __entry->interactive_phase      = interactive_phase;
+                __entry->guest_task_id          = guest_task_id;
+                __entry->cpu_load               = cpu_load;
+                __entry->flags                  = flags;
+	),
+
+	TP_printk("vm%d interactive_phase=%d gtid=%05lx cpu_load=%u flags=%u", __entry->vm_id, 
+                __entry->interactive_phase, __entry->guest_task_id, __entry->cpu_load, __entry->flags)
 );
 
 TRACE_EVENT(kvm_vlp,

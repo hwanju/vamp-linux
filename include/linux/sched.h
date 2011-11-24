@@ -2731,8 +2731,10 @@ static inline unsigned long rlimit_max(unsigned int limit)
 }
 
 #ifdef CONFIG_KVM_VDI
-extern void set_interactive_phase(struct sched_entity *se);
-extern void clear_interactive_phase(struct sched_entity *se);
+#define NORMAL_PHASE                    0
+#define NON_MIXED_INTERACTIVE_PHASE     1
+#define MIXED_INTERACTIVE_PHASE         2
+extern void set_interactive_phase(struct sched_entity *se, int interactive_phase);
 extern void list_add_ipi_pending(struct task_struct *p);
 #if 0
 extern int cpu_has_interactive_vcpu(int cpu);

@@ -293,7 +293,8 @@ struct task_group {
 #endif
 
 #ifdef CONFIG_KVM_VDI
-        int interactive_phase;
+        int interactive_phase;                  /* 0: normal phase, NON_MIXED_INTERACTIVE_PHASE: fast path, 
+                                                   MIXED_INTERACTIVE_PHASE: slow path */
 #endif
 };
 
@@ -2055,19 +2056,12 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
 
 #ifdef CONFIG_KVM_VDI
-void set_interactive_phase(struct sched_entity *se)
+void set_interactive_phase(struct sched_entity *se, int interactive_phase)
 {
         if (likely(se && se->cfs_rq))
-                se->cfs_rq->tg->interactive_phase = 1;
+                se->cfs_rq->tg->interactive_phase = interactive_phase;
 }
 EXPORT_SYMBOL_GPL(set_interactive_phase);
-
-void clear_interactive_phase(struct sched_entity *se)
-{
-        if (likely(se && se->cfs_rq))
-                se->cfs_rq->tg->interactive_phase = 0;
-}
-EXPORT_SYMBOL_GPL(clear_interactive_phase);
 
 /* hwandori-experimental: below two functions - FIXME: -> static */
 unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
