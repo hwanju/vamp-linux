@@ -454,7 +454,7 @@ static void load_timer_handler(unsigned long data)
                 /* reflect run delay to gtask load in proportion to gtask load 
                  * potential load = run delay (%) x (reactive load / vm load) */
                 reactive_gtask_load += 
-                        (vm_run_delay * reactive_gtask_load * 100) / ((now - kvm->monitor_timestamp) * cur_vm_load);
+                        (vm_run_delay * reactive_gtask_load * 100) / ((now - kvm->monitor_timestamp) * (cur_vm_load + 1));
                 if (reactive_gtask_load > load_delta_thresh_pct) 
                         kvm->last_interactive_seqnum = kvm->monitor_seqnum;     /* extend interactive phase */
         }
@@ -495,8 +495,26 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
         check_load_epoch(vcpu, guest_thread, now);
         trace_kvm_gthread_switch_arrive(get_cur_guest_task_id(vcpu), 
                         vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
-                        guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)]);
+                        guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)], 
+                        vcpu->cur_guest_task->flags);
         set_guest_thread_state(guest_thread, GUEST_THREAD_RUNNING);
+
+        if (vcpu->flags != vcpu->cur_guest_task->flags) {
+                struct task_struct *task = NULL;
+                struct pid *pid;
+
+                vcpu->flags = vcpu->cur_guest_task->flags;      /* copy gtask flags to vcpu flags */
+
+                rcu_read_lock();
+                pid = rcu_dereference(vcpu->pid);
+                if (pid)
+                        task = get_pid_task(vcpu->pid, PIDTYPE_PID);
+                rcu_read_unlock();
+                if (task) {
+                        task->se.vcpu_flags = (task->se.vcpu_flags & ~VF_MASK) | vcpu->flags;
+                        put_task_struct(task);
+                }
+        }
 }
 
 static inline void guest_thread_depart(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, unsigned long long now)
@@ -509,7 +527,8 @@ static inline void guest_thread_depart(struct kvm_vcpu *vcpu, struct guest_threa
         guest_thread->last_depart = now;
         trace_kvm_gthread_switch_depart(get_cur_guest_task_id(vcpu), 
                         vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
-                        guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)]);
+                        guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)],
+                        vcpu->cur_guest_task->flags);
         set_guest_thread_state(guest_thread, GUEST_THREAD_NOT_RUNNING);
 }
 
@@ -609,7 +628,7 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
         guest_thread_arrive(vcpu, cur_guest_thread, now);
 
         trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
-                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
+                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state, vcpu->flags);
 
 #if 0
         if (get_interactive_count(cpu) && !(vcpu->flags & VF_INTERACTIVE)) {
@@ -670,7 +689,7 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
         guest_thread_depart(vcpu, cur_guest_thread, now);
 
         trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
-                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state);
+                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state, vcpu->flags);
 
 #if 0   /* VLP disabled */
         /* vlp measure: check if this vcpu will be blocked*/

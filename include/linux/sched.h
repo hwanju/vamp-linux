@@ -1204,7 +1204,7 @@ struct sched_entity {
 #define NEW_VCPU_SE     2
         int is_vcpu;
         unsigned int vcpu_flags;
-        struct list_head ipi_pending_node;      /* hwandori-experimental */
+        struct list_head ipi_pending_node;
         int ipi_pending;
 #endif
 
