@@ -392,13 +392,20 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 	{
-		.procname	= "sched_balsched_vdi_opt",
+		.procname	= "balsched_vdi_opt",
 		.data		= &sysctl_balsched_vdi_opt,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
 		.extra2		= &one,
+	},
+	{
+		.procname	= "kvm_amvp",
+		.data		= &sysctl_kvm_amvp,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
 	},
 #endif
 #ifdef CONFIG_BALANCE_SCHED

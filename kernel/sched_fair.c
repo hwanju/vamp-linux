@@ -89,8 +89,19 @@ const_debug unsigned int sysctl_sched_migration_cost = 500000UL;
  */
 unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
 #ifdef CONFIG_KVM_VDI
+#include <linux/kvm_task_aware.h>
+
 unsigned int __read_mostly sysctl_sched_interactive_preempt = 0;
 unsigned int __read_mostly sysctl_sched_aggressive_load = 0;
+
+static inline int is_interactive_vcpu(struct sched_entity *se)
+{
+        return (se->is_vcpu &&
+                (se->cfs_rq->tg->interactive_phase == NON_MIXED_INTERACTIVE_PHASE ||
+                 (se->cfs_rq->tg->interactive_phase == MIXED_INTERACTIVE_PHASE && !(se->vcpu_flags & VF_BACKGROUND)))) ||
+                 //(se->cfs_rq->tg->interactive_phase == MIXED_INTERACTIVE_PHASE && se->vcpu_flags & VF_INTERACTIVE))) ||
+               (se->cfs_rq->tg->interactive_phase && !se->is_vcpu);
+}
 #endif
 
 #ifdef CONFIG_BALANCE_SCHED     /* lagmon */
@@ -374,16 +385,17 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 #include <linux/kvm_task_aware.h>
 static int rq_has_interactive_vcpu(struct cfs_rq *rq)
 {
-	struct task_struct *p;
-        
         if (unlikely(!rq))
                 return 0;
 
+        return rq->tg->interactive_phase;
+#if 0
 	list_for_each_entry(p, &rq->tasks, se.group_node) {
                 if (p->se.vcpu_flags & VF_INTERACTIVE)
                         return 1;
         }
         return 0;
+#endif
 }
 static DEFINE_PER_CPU_SHARED_ALIGNED(atomic_t, interactive_count);
 static inline void inc_interactive_count(int cpu)
@@ -457,6 +469,10 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 	rb_link_node(&se->run_node, parent, link);
 	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);
+#ifdef CONFIG_KVM_VDI
+        if (sysctl_kvm_amvp && !se->ipi_pending && is_interactive_vcpu(se))
+                __list_add_interactive(task_of(se));
+#endif
 }
 
 static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
@@ -756,7 +772,8 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
         if (!se->is_vcpu && atomic_read(&se->cfs_rq->tg->interactive_count))
                 se->vcpu_flags |= VF_INTERACTIVE;
 #endif
-        if (se->vcpu_flags & VF_INTERACTIVE) {
+        //if (se->vcpu_flags & VF_INTERACTIVE) {
+        if (is_interactive_vcpu(se)) {
                 se->vcpu_flags |= VF_INTERACTIVE_ON_RQ;
                 inc_interactive_count(cpu_of(rq_of(cfs_rq)));
         }
@@ -1107,7 +1124,6 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 		__enqueue_entity(cfs_rq, se);
 	se->on_rq = 1;
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
         if (se->ipi_pending) 
                 __list_add_ipi_pending(task_of(se), se->ipi_pending);
 #endif
@@ -1211,6 +1227,10 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
 	unsigned long ideal_runtime, delta_exec;
 
+#if CONFIG_KVM_VDI
+        if (sysctl_kvm_amvp && is_interactive_vcpu(curr))
+                return;
+#endif
 	ideal_runtime = sched_slice(cfs_rq, curr);
 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
 	if (delta_exec > ideal_runtime) {
@@ -1298,11 +1318,16 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 	struct sched_entity *left = se;
 
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
         struct sched_entity *p, *n;
 
         list_for_each_entry_safe(p, n, &cfs_rq->ipi_pending_list, ipi_pending_node) {
                 list_del_init(&p->ipi_pending_node);
+                if (p->on_rq && cfs_rq_of(p) == cfs_rq)
+                        return p;
+        }
+
+        list_for_each_entry_safe(p, n, &cfs_rq->interactive_list, interactive_node) {
+                list_del_init(&p->interactive_node);
                 if (p->on_rq && cfs_rq_of(p) == cfs_rq)
                         return p;
         }
@@ -1987,13 +2012,23 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 {
 	s64 gran, vdiff = curr->vruntime - se->vruntime;
 
+#ifdef CONFIG_KVM_VDI
+        /* this check can be done before vdiff comparison, because this condition is always carried out
+         * between sibling vcpus where fairness doesn't have to be met */
+        if (sysctl_kvm_amvp) { /* if the woken task (se) is the first entry in its interactive list */
+                if (list_first_entry(&se->cfs_rq->interactive_list, struct sched_entity, interactive_node) == se)
+                        return 1;
+                else if (is_interactive_vcpu(curr))
+                        return 0;
+        }
+#endif
 	if (vdiff <= 0)
 		return -1;
 #ifdef CONFIG_KVM_VDI
         if (sysctl_sched_interactive_preempt) {
                 if (rq_has_interactive_vcpu(se->my_q))
                         return 1;
-                if (rq_has_interactive_vcpu(curr->my_q))
+                else if (rq_has_interactive_vcpu(curr->my_q))
                         return 0;
         }
 #endif
@@ -2226,7 +2261,7 @@ int can_migrate_task(struct task_struct *p, struct rq *rq, int this_cpu,
 	 */
 	if (!cpumask_test_cpu(this_cpu, &p->cpus_allowed)) {
 #ifdef CONFIG_BALANCE_SCHED
-                if (is_fair_balsched(p->se.cfs_rq->tg)) { // && !get_interactive_count(this_cpu) /* EXPERIMENTAL */) {
+                if (is_fair_balsched(p->se.cfs_rq->tg)) {
                         soft_affinity = 1;
                         goto skip_affinity_violation;
                 }

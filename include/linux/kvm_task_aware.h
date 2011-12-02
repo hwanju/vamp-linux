@@ -9,7 +9,7 @@
 #define MAX_GUEST_TASK_VCPU     8       /* FIXME: can have large value */
 
 #define GUEST_THREAD_NOT_RUNNING        0
-#define GUEST_THREAD_RUNNING            1
+#define GUEST_THREAD_RUNNING            2
 
 /* 
  * Load tracking related
@@ -31,15 +31,8 @@ extern unsigned int load_period_shift;
 #define VCPU_WAITING    1 
 #define VCPU_RUNNING    2
 
-/* VCPU flags */
-#define VF_SHIFT                16
-#define VF_MASK                 ((1 << VF_SHIFT) - 1)
-#define VF_INTERACTIVE          0x00000001                      /* I have interactive workloads */
-#define VF_BACKGROUND           0x00000002                      /* I have background workloads */
-#define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
-
 struct guest_thread_info {
-        volatile long state;            /* 0 = not running, 1 = running */
+        volatile long state;            /* 0 = not running, 2 = running */
         int cpu;                        /* physical cpu id hosting this vcpu */
         unsigned long long last_depart; /* for garbage collection */ 
         

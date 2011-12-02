@@ -24,7 +24,7 @@ int kvm_ui_event(struct kvm *kvm, uint32_t arg)
         int event_info = get_event_info(arg);
         unsigned long long now = sched_clock();
 
-        trace_kvm_ui(event_type, event_info, load_idx_by_time(now));
+        trace_kvm_ui(kvm, event_type, event_info, load_idx_by_time(now));
 
         /* when an ui event is released, set the current timestamp into kvm */
         if ((event_type == kvm_kbd_pressed && likely_load_gen_keys(event_info)) || 

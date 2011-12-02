@@ -346,9 +346,8 @@ struct cfs_rq {
 	struct list_head tasks;
 	struct list_head *balance_iterator;
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
 	struct list_head ipi_pending_list;
-	raw_spinlock_t ipi_pending_list_lock;
+	struct list_head interactive_list;
 #endif
 
 	/*
@@ -2067,6 +2066,7 @@ EXPORT_SYMBOL_GPL(set_interactive_phase);
 unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
 unsigned int __read_mostly sysctl_kvm_ipi_indirect = 0;
 unsigned int __read_mostly sysctl_balsched_vdi_opt = 0;
+unsigned int __read_mostly sysctl_kvm_amvp         = 0;
 
 #include <linux/futex.h>
 
@@ -2112,6 +2112,36 @@ void list_add_ipi_pending(struct task_struct *p)
         }
 }
 EXPORT_SYMBOL_GPL(list_add_ipi_pending);
+
+void __list_add_interactive(struct task_struct *p)
+{
+        struct sched_entity *se = &p->se;
+        struct cfs_rq *cfs_rq = se->cfs_rq;
+
+        if (list_empty(&se->interactive_node))
+                list_add_tail(&se->interactive_node, &cfs_rq->interactive_list);
+}
+
+void update_vcpu_flags(struct task_struct *p, unsigned int new_flags)
+{
+        //unsigned int old_flags = p->se.vcpu_flags & VF_MASK;
+        p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
+
+        if (sysctl_kvm_amvp) {
+                if (new_flags & VF_BACKGROUND)
+                        set_user_nice(p, sysctl_kvm_amvp);
+                else
+                        set_user_nice(p, 0);
+        }
+
+#if 0
+        if ((old_flags & VF_BACKGROUND && !(new_flags & VF_BACKGROUND)) ||
+            (new_flags & VF_BACKGROUND && !(old_flags & VF_BACKGROUND))) {
+                set_tsk_need_resched(p);
+        }
+#endif
+}
+EXPORT_SYMBOL_GPL(update_vcpu_flags);
 #endif
 
 #include "sched_idletask.c"
@@ -2584,6 +2614,9 @@ static inline unsigned long group_weight_ratio(struct task_group *tg, int cpu, u
 	unsigned long group_weight = tg->se[cpu]->load.weight;
         unsigned long others_weight = weighted_cpuload(cpu) - group_weight;
 
+        if (others_weight == 0)
+                return 0;
+
         group_weight += effective_load(tg, cpu, weight, weight);
         group_weight <<= scale;
 
@@ -2656,11 +2689,16 @@ static inline int try_to_balance_affine(struct task_struct *p)
                         }
                 }
                 else if (sysctl_balsched_vdi_opt &&     /* EXPERIMENTAL */
-                         tg->interactive_phase && (!se->is_vcpu || !(se->vcpu_flags & VF_INTERACTIVE))) {
+                         tg->interactive_phase) {
+                         //tg->interactive_phase && (!se->is_vcpu || !(se->vcpu_flags & VF_INTERACTIVE))) {
                         unsigned long gw_ratio, max_gw_ratio = 0;
                         for_each_cpu(i, cpu_active_mask) {
                                 gw_ratio = group_weight_ratio(tg, i, se->load.weight);
-                                if (gw_ratio > max_gw_ratio) {
+                                if (gw_ratio == 0) {
+                                        selected_cpu = -1;
+                                        break;
+                                }
+                                else if (gw_ratio > max_gw_ratio) {
                                         max_gw_ratio = gw_ratio;
                                         selected_cpu = i;
                                 }
@@ -3093,8 +3131,8 @@ static void __sched_fork(struct task_struct *p)
 	p->se.vruntime			= 0;
 	INIT_LIST_HEAD(&p->se.group_node);
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
 	INIT_LIST_HEAD(&p->se.ipi_pending_node);
+	INIT_LIST_HEAD(&p->se.interactive_node);
 #endif
 
 #ifdef CONFIG_SCHEDSTATS
@@ -8197,9 +8235,8 @@ static void init_cfs_rq(struct cfs_rq *cfs_rq, struct rq *rq)
 	cfs_rq->tasks_timeline = RB_ROOT;
 	INIT_LIST_HEAD(&cfs_rq->tasks);
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
 	INIT_LIST_HEAD(&cfs_rq->ipi_pending_list);
-        raw_spin_lock_init(&cfs_rq->ipi_pending_list_lock);
+	INIT_LIST_HEAD(&cfs_rq->interactive_list);
 #endif
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	cfs_rq->rq = rq;

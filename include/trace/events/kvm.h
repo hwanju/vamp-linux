@@ -336,6 +336,7 @@ TRACE_EVENT(kvm_vcpu_switch,
         trace_kvm_vcpu_switch(1, vcpu_id, load_idx, cpu_load, state, flags)
 #define trace_kvm_vcpu_switch_depart(vcpu_id, load_idx, cpu_load, state, flags) \
         trace_kvm_vcpu_switch(0, vcpu_id, load_idx, cpu_load, state, flags)
+
 TRACE_EVENT(kvm_gthread_switch,
 	TP_PROTO(int op, unsigned long guest_task_id, int vcpu_id, unsigned int load_idx, u64 cpu_load, unsigned int flags),
 	TP_ARGS(op, guest_task_id, vcpu_id, load_idx, cpu_load, flags),
@@ -368,22 +369,25 @@ TRACE_EVENT(kvm_gthread_switch,
 #endif
 
 TRACE_EVENT(kvm_ui,
-	TP_PROTO(int event_type, int event_info, unsigned int load_idx),
-	TP_ARGS(event_type, event_info, load_idx),
+	TP_PROTO(struct kvm *kvm, int event_type, int event_info, unsigned int load_idx),
+	TP_ARGS(kvm, event_type, event_info, load_idx),
 
 	TP_STRUCT__entry(
+		__field(	int,		vm_id           )
 		__field(	int,		event_type      )
 		__field(	int,	        event_info      )
 		__field(	unsigned int,   load_idx        )
 	),
 
 	TP_fast_assign(
+		__entry->vm_id          = kvm->vm_id;
 		__entry->event_type     = event_type;
 		__entry->event_info     = event_info;
 		__entry->load_idx       = load_idx;
 	),
 
-	TP_printk("type=%d info=%d load_idx=%u", __entry->event_type, __entry->event_info, __entry->load_idx)
+	TP_printk("vm_id=%d type=%d info=%d load_idx=%u", 
+                __entry->vm_id, __entry->event_type, __entry->event_info, __entry->load_idx)
 );
 
 TRACE_EVENT(kvm_load_check,

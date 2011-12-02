@@ -1205,6 +1205,7 @@ struct sched_entity {
         int is_vcpu;
         unsigned int vcpu_flags;
         struct list_head ipi_pending_node;
+        struct list_head interactive_node;
         int ipi_pending;
 #endif
 
@@ -2029,6 +2030,7 @@ extern unsigned int sysctl_kvm_ipi_indirect;
 extern unsigned int sysctl_sched_interactive_preempt;
 extern unsigned int sysctl_sched_aggressive_load;
 extern unsigned int sysctl_balsched_vdi_opt;
+extern unsigned int sysctl_kvm_amvp;
 #endif
 extern unsigned int sysctl_sched_rt_period;
 extern int sysctl_sched_rt_runtime;
@@ -2736,6 +2738,14 @@ static inline unsigned long rlimit_max(unsigned int limit)
 #define MIXED_INTERACTIVE_PHASE         2
 extern void set_interactive_phase(struct sched_entity *se, int interactive_phase);
 extern void list_add_ipi_pending(struct task_struct *p);
+
+/* VCPU flags */
+#define VF_SHIFT                16
+#define VF_MASK                 ((1 << VF_SHIFT) - 1)
+#define VF_INTERACTIVE          0x00000001                      /* I have interactive workloads */
+#define VF_BACKGROUND           0x00000002                      /* I have background workloads */
+#define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
+extern void update_vcpu_flags(struct task_struct *p, unsigned int new_flags);
 #if 0
 extern int cpu_has_interactive_vcpu(int cpu);
 #endif
