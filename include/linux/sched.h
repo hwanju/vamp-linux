@@ -1208,12 +1208,6 @@ struct sched_entity {
         struct list_head interactive_node;
         int ipi_pending;
 #endif
-
-#ifdef CONFIG_BALANCE_SCHED
-        u64 shares_sum_exec_runtime;
-        u64 shares_avg;
-	u64 lag_monitor_period;
-#endif
 };
 
 struct sched_rt_entity {
@@ -2028,6 +2022,7 @@ static inline unsigned int get_sysctl_timer_migration(void)
 extern unsigned int sysctl_kvm_ipi_first;
 extern unsigned int sysctl_kvm_ipi_indirect;
 extern unsigned int sysctl_sched_interactive_preempt;
+extern unsigned int sysctl_interactive_vcpu_preempt_disable;
 extern unsigned int sysctl_sched_aggressive_load;
 extern unsigned int sysctl_balsched_vdi_opt;
 extern unsigned int sysctl_kvm_amvp;
@@ -2745,10 +2740,8 @@ extern void list_add_ipi_pending(struct task_struct *p);
 #define VF_INTERACTIVE          0x00000001                      /* I have interactive workloads */
 #define VF_BACKGROUND           0x00000002                      /* I have background workloads */
 #define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
-extern void update_vcpu_flags(struct task_struct *p, unsigned int new_flags);
-#if 0
-extern int cpu_has_interactive_vcpu(int cpu);
-#endif
+#define VF_BACKGROUND_ON_RQ     (VF_BACKGROUND  << VF_SHIFT)    /* I'm on runq as an background vcpu (only for se's vcpu_flags) */
+extern void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice);
 extern int get_interactive_count(int cpu);
 extern int find_interactiveless_cpu(int this_cpu, struct task_struct *p);
 #endif

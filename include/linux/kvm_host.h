@@ -166,14 +166,18 @@ struct kvm_vcpu {
         u64 last_depart;        /* last vcpu depart time */
         u64 last_arrival;       /* last vcpu arrival time */
         u64 load_epoch_id;      /* inidicating the current load_epoch_id */
+
         /* preserving the past cpu loads as well as the current one
            indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
         u64 cpu_loads[NR_LOAD_ENTRIES];
-        ////unsigned int prev_cpu_load_avg, cpu_load_avg;   /* in percentage (0-100) */
+        u64 exec_time;          /* accumulated execution time within amvp_monitor_window */
+        u64 bg_exec_time;       /* accumulated execution time bg tasks are running */
 
         /* vcpu stat */
         volatile long state;
 	unsigned int flags;
+        int bg_nice;
+
         /* time spent waiting on a runqueue */
 	unsigned long long pre_monitor_run_delay, prev_run_delay, run_delay;
         unsigned int reactive_gthread_load;             /* accumulated load of increased guest threads */

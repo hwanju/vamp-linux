@@ -13,6 +13,8 @@
 #define set_vcpu_state(vcpu, state_value)     \
         set_mb(vcpu->state, (state_value))
 
+#define get_bg_vcpu_nice(vcpu)     (vcpu->bg_exec_time * 19 / (vcpu->exec_time + 1))
+
 #define KVM_TA_DEBUG
 
 #ifdef KVM_TA_DEBUG
@@ -59,6 +61,10 @@ static inline void account_cpu_load(struct kvm_vcpu *vcpu, struct guest_thread_i
 {
         unsigned long long i;
         unsigned long long cur_load_epoch_id = load_epoch_id(now);
+
+        vcpu->exec_time += exec_time;
+        if (vcpu->flags & VF_BACKGROUND)
+                vcpu->bg_exec_time += exec_time;
         
         for (i = guest_thread->load_epoch_id; i < cur_load_epoch_id; i++) {
                 unsigned long long account_time = LOAD_EPOCH_TIME_IN_NSEC;
@@ -297,6 +303,10 @@ module_param(bg_load_thresh_pct, uint, 0644);
 static unsigned int max_ui_monitor_period = DEFAULT_MAX_UI_MONITOR_PERIOID;
 module_param(max_ui_monitor_period, uint, 0644);
 
+#define DEFAULT_AMVP_MONITOR_WINDOW     30000000UL      /* 30ms */
+static unsigned long amvp_monitor_window = DEFAULT_AMVP_MONITOR_WINDOW;
+module_param(amvp_monitor_window, ulong, 0644);
+
 /* 
  * calculate cpu loads during pre-monitoring period, that is prior to a user event
  *  now: the time (in ns) when a user input occurs
@@ -385,7 +395,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now, un
 }
 
 #define in_interactive_phase(kvm)       \
-        (kvm->monitor_seqnum < max_ui_monitor_period && kvm->monitor_seqnum - kvm->last_interactive_seqnum < 4) // FIXME: 10 is hardcoded
+        (kvm->monitor_seqnum < max_ui_monitor_period && kvm->monitor_seqnum - kvm->last_interactive_seqnum < 6) // FIXME: 6 is hardcoded
 static void load_timer_handler(unsigned long data)
 {
         struct kvm *kvm = (struct kvm *)data;
@@ -503,23 +513,33 @@ static void load_timer_handler(unsigned long data)
 
 static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, unsigned long long now)
 {
+        int bg_nice = get_bg_vcpu_nice(vcpu);
+
         guest_thread->cpu = vcpu->cpu;
         guest_thread->last_arrival = now;
         check_load_epoch(vcpu, guest_thread, now);
+
+        if (vcpu->kvm->interactive_phase == NORMAL_PHASE) {
+                vcpu->cur_guest_task->flags = 0;
+                vcpu->exec_time = vcpu->bg_exec_time = 0;
+        }
+
+        if (vcpu->cur_guest_task->flags & VF_BACKGROUND) 
+                trace_kvm_bg_vcpu(vcpu, get_bg_vcpu_nice(vcpu));
+
         trace_kvm_gthread_switch_arrive(get_cur_guest_task_id(vcpu), 
                         vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
                         guest_thread->cpu_loads[load_idx(guest_thread->load_epoch_id)], 
                         vcpu->cur_guest_task->flags);
         set_guest_thread_state(guest_thread, GUEST_THREAD_RUNNING);
 
-        if (vcpu->kvm->interactive_phase == NORMAL_PHASE)
-                vcpu->cur_guest_task->flags = 0;
-
-        if (vcpu->flags != vcpu->cur_guest_task->flags) {
+        if (vcpu->kvm->interactive_phase == MIXED_INTERACTIVE_PHASE &&
+            (vcpu->flags != vcpu->cur_guest_task->flags || vcpu->bg_nice != bg_nice)) {
                 struct task_struct *task = NULL;
                 struct pid *pid;
 
                 vcpu->flags = vcpu->cur_guest_task->flags;      /* copy gtask flags to vcpu flags */
+                vcpu->bg_nice = bg_nice;
 
                 rcu_read_lock();
                 pid = rcu_dereference(vcpu->pid);
@@ -527,7 +547,7 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
                         task = get_pid_task(vcpu->pid, PIDTYPE_PID);
                 rcu_read_unlock();
                 if (task) {
-                        update_vcpu_flags(task, vcpu->flags);
+                        update_vcpu_flags(task, vcpu->flags, vcpu->bg_nice);
                         put_task_struct(task);
                 }
         }
@@ -637,7 +657,7 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
                 set_vcpu_state(vcpu, VCPU_BLOCKED);
 
                 /* cummulative run delay should be invalidated since no longer cpu is needed */
-                vcpu->prev_run_delay = vcpu->run_delay;     /* test */
+                ////vcpu->prev_run_delay = vcpu->run_delay;     /* test */
         }
         else    /* to wait */
                 set_vcpu_state(vcpu, VCPU_WAITING);
@@ -650,6 +670,13 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
 
         trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
                         vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state, vcpu->flags);
+
+        while (vcpu->exec_time > amvp_monitor_window) {
+                /* borrowed code from update_cfs_load */
+		asm("" : "+rm" (vcpu->exec_time));
+		vcpu->exec_time /= 2;
+		vcpu->bg_exec_time /= 2;
+        }
 }
 
 /*
@@ -680,10 +707,15 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int du
         if (!load_monitor_enabled)
                 return;
         
-        if (!timer_pending(&kvm->load_timer)) {
+        if (!timer_pending(&kvm->load_timer)) {       // original code
+        //if (!timer_pending(&kvm->load_timer) || kvm->monitor_seqnum >= 3) {  /* FIXME: hardcoded 3 (>= 360ms) */
                 int vidx;
                 struct kvm_vcpu *vcpu;
                 unsigned long long pre_monitor_duration = (LOAD_EPOCH_TIME_IN_NSEC * (NR_LOAD_ENTRIES - 1)) + load_epoch_offset(now);
+
+                //del_timer_sync(&kvm->load_timer);
+                //if (kvm->interactive_phase)
+                //        trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
 
                 kvm_for_each_vcpu(vidx, vcpu, kvm) {
                         /* if last_arrival > t -> pre_monitor_run_delay = run_delay - prev_run_delay,
@@ -698,9 +730,6 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int du
                                 vcpu->pre_monitor_run_delay = pre_monitor_duration;
                         else
                                 vcpu->pre_monitor_run_delay = 0;
-
-                        //printk("[DEBUG] %s: v%d(%lu): in=%d pmrd=%llu r-p=%llu\n", __func__, vcpu->vcpu_id, vcpu->state,
-                        //                vcpu->last_arrival > now - pre_monitor_duration, vcpu->pre_monitor_run_delay, vcpu->run_delay - vcpu->prev_run_delay);
                 }
                 kvm->monitor_seqnum = kvm->last_interactive_seqnum = 0;
                 kvm->monitor_timestamp = now;

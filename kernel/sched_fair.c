@@ -92,7 +92,7 @@ unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
 #include <linux/kvm_task_aware.h>
 
 unsigned int __read_mostly sysctl_sched_interactive_preempt = 0;
-unsigned int __read_mostly sysctl_sched_aggressive_load = 0;
+unsigned int __read_mostly sysctl_interactive_vcpu_preempt_disable = 0;
 
 static inline int is_interactive_vcpu(struct sched_entity *se)
 {
@@ -104,7 +104,7 @@ static inline int is_interactive_vcpu(struct sched_entity *se)
 }
 #endif
 
-#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
+#ifdef CONFIG_BALANCE_SCHED     /* for tracing per-cpu grp entity share */
 #define entity_is_l1_group(se)  (!se->parent && se->my_q)
 #endif
 static const struct sched_class fair_sched_class;
@@ -399,7 +399,7 @@ static int rq_has_interactive_vcpu(struct cfs_rq *rq)
 }
 static DEFINE_PER_CPU_SHARED_ALIGNED(atomic_t, interactive_count);
 static inline void inc_interactive_count(int cpu)
-{
+{       /* FIXME: why atomic? */
         atomic_inc(&per_cpu(interactive_count, cpu));
 }
 static inline void dec_interactive_count(int cpu)
@@ -470,8 +470,10 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	rb_link_node(&se->run_node, parent, link);
 	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);
 #ifdef CONFIG_KVM_VDI
+#if 0   /* vditest */
         if (sysctl_kvm_amvp && !se->ipi_pending && is_interactive_vcpu(se))
                 __list_add_interactive(task_of(se));
+#endif
 #endif
 }
 
@@ -768,14 +770,13 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
         }
 #endif
 #ifdef CONFIG_KVM_VDI
-#if 0
-        if (!se->is_vcpu && atomic_read(&se->cfs_rq->tg->interactive_count))
-                se->vcpu_flags |= VF_INTERACTIVE;
-#endif
-        //if (se->vcpu_flags & VF_INTERACTIVE) {
         if (is_interactive_vcpu(se)) {
                 se->vcpu_flags |= VF_INTERACTIVE_ON_RQ;
                 inc_interactive_count(cpu_of(rq_of(cfs_rq)));
+        }
+        else {
+                se->vcpu_flags |= VF_BACKGROUND_ON_RQ;
+                cfs_rq->nr_running_bg_vcpus++;
         }
 #endif
 	cfs_rq->nr_running++;
@@ -800,10 +801,10 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
                 se->vcpu_flags &= ~VF_INTERACTIVE_ON_RQ;
                 dec_interactive_count(cpu_of(rq_of(cfs_rq)));
         }
-#if 0
-        if (!se->is_vcpu && !atomic_read(&se->cfs_rq->tg->interactive_count))
-                se->vcpu_flags &= ~VF_INTERACTIVE;
-#endif
+        if (se->vcpu_flags & VF_BACKGROUND_ON_RQ) {
+                se->vcpu_flags &= ~VF_BACKGROUND_ON_RQ;
+                cfs_rq->nr_running_bg_vcpus--;
+        }
 #endif
 	cfs_rq->nr_running--;
 }
@@ -852,7 +853,7 @@ static void update_cfs_load(struct cfs_rq *cfs_rq, int global_update)
 		cfs_rq->load_last = now;
 		cfs_rq->load_avg += delta * load;
 	}
-#ifdef CONFIG_KVM_VDI
+#if 0 //def CONFIG_KVM_VDI
         else if (sysctl_sched_aggressive_load && cfs_rq->nr_running_vcpus) {  /* load == 0 */
 		cfs_rq->load_avg = 0;
 		cfs_rq->load_period = 0;
@@ -939,19 +940,6 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
 		account_entity_enqueue(cfs_rq, se);
 }
 
-#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
-static inline void update_shares_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)
-{
-        u64 now, delta;
-
-        now = rq_of(cfs_rq)->clock_task;
-        delta = now - se->shares_sum_exec_runtime;
-        se->shares_sum_exec_runtime = now;
-        se->lag_monitor_period += delta;
-        se->shares_avg += delta * se->load.weight;
-}
-#endif
-
 static void update_cfs_shares(struct cfs_rq *cfs_rq)
 {
 	struct task_group *tg;
@@ -967,10 +955,6 @@ static void update_cfs_shares(struct cfs_rq *cfs_rq)
 		return;
 #endif
 	shares = calc_cfs_shares(cfs_rq, tg);
-#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
-        if (entity_is_l1_group(se) && cfs_rq->curr == se)
-                update_shares_avg(cfs_rq, se);
-#endif
 
 	reweight_entity(cfs_rq_of(se), se, shares);
 }
@@ -1228,7 +1212,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	unsigned long ideal_runtime, delta_exec;
 
 #if CONFIG_KVM_VDI
-        if (sysctl_kvm_amvp && is_interactive_vcpu(curr))
+        if (sysctl_interactive_vcpu_preempt_disable && is_interactive_vcpu(curr))
                 return;
 #endif
 	ideal_runtime = sched_slice(cfs_rq, curr);
@@ -1292,12 +1276,6 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		se->statistics.slice_max = max(se->statistics.slice_max,
 			se->sum_exec_runtime - se->prev_sum_exec_runtime);
 	}
-#endif
-#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
-        if (entity_is_l1_group(se)) {
-                se->shares_avg = se->lag_monitor_period = 0;    /* FIXME */
-                se->shares_sum_exec_runtime = se->sum_exec_runtime;
-        }
 #endif
 	se->prev_sum_exec_runtime = se->sum_exec_runtime;
 }
@@ -1375,12 +1353,6 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 		__enqueue_entity(cfs_rq, prev);
 	}
 	cfs_rq->curr = NULL;
-#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
-        if (entity_is_l1_group(prev)) {
-                update_shares_avg(cfs_rq, prev);
-                trace_sched_lag(cpu_of(rq_of(cfs_rq)), prev->shares_avg, prev->lag_monitor_period);
-        }
-#endif
 }
 
 static void
@@ -2015,11 +1987,11 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 #ifdef CONFIG_KVM_VDI
         /* this check can be done before vdiff comparison, because this condition is always carried out
          * between sibling vcpus where fairness doesn't have to be met */
-        if (sysctl_kvm_amvp) { /* if the woken task (se) is the first entry in its interactive list */
-                if (list_first_entry(&se->cfs_rq->interactive_list, struct sched_entity, interactive_node) == se)
-                        return 1;
-                else if (is_interactive_vcpu(curr))
+        if (sysctl_interactive_vcpu_preempt_disable) { /* if the woken task (se) is the first entry in its interactive list */
+                if (is_interactive_vcpu(curr))
                         return 0;
+                //else if (list_first_entry(&se->cfs_rq->interactive_list, struct sched_entity, interactive_node) == se)
+                //        return 1;
         }
 #endif
 	if (vdiff <= 0)
@@ -2157,6 +2129,11 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 	p = task_of(se);
 	hrtick_start_fair(rq, p);
 
+#ifdef CONFIG_KVM_VDI
+        if (se->cfs_rq->tg != &root_task_group)
+                trace_sched_group_weight(p->tgid, p->pid, se->load.weight, se->cfs_rq->tg->se[cpu_of(rq)]->load.weight, 
+                                se->vruntime, se->cfs_rq->tg->se[cpu_of(rq)]->vruntime);
+#endif
 	return p;
 }
 

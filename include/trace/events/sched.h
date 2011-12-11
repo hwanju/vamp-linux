@@ -390,28 +390,104 @@ TRACE_EVENT(sched_pi_setprio,
 			__entry->comm, __entry->pid,
 			__entry->oldprio, __entry->newprio)
 );
-#ifdef CONFIG_BALANCE_SCHED     /* lagmon */
-TRACE_EVENT(sched_lag,
+#ifdef CONFIG_BALANCE_SCHED
+TRACE_EVENT(sched_group_weight,
 
-	TP_PROTO(int cpu, u64 shares_avg, u64 lag_monitor_period),
+	TP_PROTO(unsigned int tgid, int pid, unsigned long weight, unsigned long group_weight, u64 vruntime, u64 group_vruntime),
 
-	TP_ARGS(cpu, shares_avg, lag_monitor_period),
+	TP_ARGS(tgid, pid, weight, group_weight, vruntime, group_vruntime),
 
 	TP_STRUCT__entry(
-		__field( int,   cpu                     )
-		__field( u64,	shares_avg              )
-		__field( u64,	lag_monitor_period      )
+		__field( unsigned int,  tgid            )
+		__field( int,           pid             )
+		__field( unsigned long, weight          )
+		__field( unsigned long, group_weight    )
+		__field( u64,           vruntime        )
+		__field( u64,           group_vruntime  )
 	),
 
 	TP_fast_assign(
-		__entry->cpu                    = cpu;
-		__entry->shares_avg             = shares_avg;
-		__entry->lag_monitor_period     = lag_monitor_period;
+		__entry->tgid           = tgid;
+		__entry->pid            = pid;
+		__entry->weight         = weight;
+		__entry->group_weight   = group_weight;
+		__entry->vruntime       = vruntime;
+		__entry->group_vruntime = group_vruntime;
 	),
 
-	TP_printk("cpu%d shares_avg=%llu lag_monitor_period=%llu",
-                __entry->cpu, __entry->shares_avg, __entry->lag_monitor_period)
+	TP_printk("tgid=%d pid=%d weight=%lu group_weight=%lu vruntime=%llu group_vruntime=%llu",
+                __entry->tgid, __entry->pid, __entry->weight, __entry->group_weight, __entry->vruntime, __entry->group_vruntime)
 );
+TRACE_EVENT(balsched_cpu_stat,
+	TP_PROTO(int vm_id, int cpu, int load_imbalance, unsigned long nr_running_vcpus, int interactive_count),
+
+	TP_ARGS(vm_id, cpu, load_imbalance, nr_running_vcpus, interactive_count),
+
+	TP_STRUCT__entry(
+		__field( int,           vm_id                   )
+		__field( int,           cpu                     )
+		__field( int,           load_imbalance          )
+		__field( unsigned long, nr_running_vcpus        )
+		__field( int,           interactive_count       )
+	),
+
+	TP_fast_assign(
+		__entry->vm_id                  = vm_id;
+		__entry->cpu                    = cpu;
+		__entry->load_imbalance         = load_imbalance;
+		__entry->nr_running_vcpus       = nr_running_vcpus;
+		__entry->interactive_count      = interactive_count;
+	),
+
+	TP_printk("vm_id=%d cpu=%d load_imbalance=%d nr_running_vcpus=%lu interactive_count=%d",
+                __entry->vm_id, __entry->cpu, __entry->load_imbalance, __entry->nr_running_vcpus, __entry->interactive_count)
+);
+TRACE_EVENT(balsched_affinity,
+	TP_PROTO(int vm_id, int affinity_updated, unsigned long affinity_bit),
+
+	TP_ARGS(vm_id, affinity_updated, affinity_bit),
+
+	TP_STRUCT__entry(
+		__field( int,           vm_id                   )
+		__field( int,           affinity_updated        )
+		__field( unsigned long, affinity_bit            )
+	),
+
+	TP_fast_assign(
+		__entry->vm_id                  = vm_id;
+		__entry->affinity_updated       = affinity_updated;
+		__entry->affinity_bit           = affinity_bit;
+	),
+
+	TP_printk("vm_id=%d affinity_updated=%d affinity_bit=%02lx",
+                __entry->vm_id, __entry->affinity_updated, __entry->affinity_bit)
+);
+TRACE_EVENT(balsched_cpu_load,
+        TP_PROTO(int cpu, unsigned long weight, s64 expected_load, unsigned long cur_total_weight, s64 cpu_load, unsigned long weight_per_cpu),
+
+        TP_ARGS(cpu, weight, expected_load, cur_total_weight, cpu_load, weight_per_cpu),
+
+        TP_STRUCT__entry(
+                __field( int,   cpu)
+                __field( unsigned long, weight)
+                __field( s64,   expected_load)
+                __field( unsigned long, cur_total_weight)
+                __field( s64,   cpu_load)
+                __field( unsigned long, weight_per_cpu)
+        ),
+
+        TP_fast_assign(
+                __entry->cpu    = cpu;
+                __entry->weight = weight;
+                __entry->expected_load  = expected_load;
+                __entry->cur_total_weight       = cur_total_weight;
+                __entry->cpu_load       = cpu_load;
+                __entry->weight_per_cpu = weight_per_cpu;
+        ),
+
+        TP_printk("cpu=%d weight=%lu expected_load=%lld cur_total_weight=%lu cpu_load=%lld weight_per_cpu=%lu",
+                       __entry->cpu, __entry->weight, __entry->expected_load, __entry->cur_total_weight, __entry->cpu_load, __entry->weight_per_cpu)
+)
 #endif
 #ifdef CONFIG_KVM_VDI   /* hwandori-experimental */
 TRACE_EVENT(sched_ipi_futex,

@@ -545,46 +545,26 @@ TRACE_EVENT(kvm_gtask_stat,
                 __entry->interactive_phase, __entry->guest_task_id, __entry->cpu_load, __entry->flags)
 );
 
-TRACE_EVENT(kvm_vlp,
-	TP_PROTO(int vm_id, int vlp, u64 vlp_avg, u64 vlp_period),
-	TP_ARGS(vm_id, vlp, vlp_avg, vlp_period),
+TRACE_EVENT(kvm_bg_vcpu,
+	TP_PROTO(struct kvm_vcpu *vcpu, int bg_vcpu_nice),
+	TP_ARGS(vcpu, bg_vcpu_nice),
 
 	TP_STRUCT__entry(
-		__field(	int,		vm_id           )
-		__field(	int,	        vlp             )
-		__field(	u64,	        vlp_avg         )
-		__field(	u64,	        vlp_period      )
+		__field(	int,		vcpu_id         )
+		__field(	u64,	        bg_exec_time    )
+		__field(	u64,	        exec_time       )
+		__field(	int,		bg_vcpu_nice    )
 	),
 
 	TP_fast_assign(
-		__entry->vm_id          = vm_id;
-		__entry->vlp            = vlp;
-		__entry->vlp_avg        = vlp_avg;
-		__entry->vlp_period     = vlp_period;
+		__entry->vcpu_id        = vcpu->vcpu_id;
+		__entry->bg_exec_time   = vcpu->bg_exec_time;
+		__entry->exec_time      = vcpu->exec_time;
+		__entry->bg_vcpu_nice   = bg_vcpu_nice;
 	),
-	TP_printk("vm%d vlp=%d avg=%llu period=%llu", __entry->vm_id, 
-                __entry->vlp, __entry->vlp_avg, __entry->vlp_period)
+	TP_printk("v%d bg_exec_time=%llu exec_time=%llu bg_vcpu_nice=%d", __entry->vcpu_id, 
+                __entry->bg_exec_time, __entry->exec_time, __entry->bg_vcpu_nice)
 );
-
-TRACE_EVENT(kvm_vlp_avg,
-	TP_PROTO(int vm_id, u64 vlp_avg, u64 vlp_period),
-	TP_ARGS(vm_id, vlp_avg, vlp_period),
-
-	TP_STRUCT__entry(
-		__field(	int,		vm_id           )
-		__field(	u64,	        vlp_avg         )
-		__field(	u64,	        vlp_period      )
-	),
-
-	TP_fast_assign(
-		__entry->vm_id          = vm_id;
-		__entry->vlp_avg        = vlp_avg;
-		__entry->vlp_period     = vlp_period;
-	),
-	TP_printk("vm%d avg=%llu period=%llu", __entry->vm_id, 
-                __entry->vlp_avg, __entry->vlp_period)
-);
-
 #endif /* _TRACE_KVM_MAIN_H */
 
 /* This part must be outside protection */

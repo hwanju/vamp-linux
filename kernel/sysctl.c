@@ -383,8 +383,8 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 	{
-		.procname	= "sched_aggressive_load",
-		.data		= &sysctl_sched_aggressive_load,
+		.procname	= "interactive_vcpu_preempt_disable",
+		.data		= &sysctl_interactive_vcpu_preempt_disable,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
