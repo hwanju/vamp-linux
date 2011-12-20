@@ -2070,47 +2070,63 @@ unsigned int __read_mostly sysctl_balsched_vdi_opt = 0;
 unsigned int __read_mostly sysctl_kvm_amvp         = 0;
 
 #include <linux/futex.h>
-
-int __list_add_ipi_pending(struct task_struct *p, int type)
+int __list_add_ipi_pending(struct task_struct *p /*FIXME: p is for debugging-only*/, struct sched_entity *se, int type, int force_enqueue)
 {
-        struct sched_entity *se = &p->se;
         struct cfs_rq *cfs_rq = se->cfs_rq;
 
         se->ipi_pending = type;
-        if (se->on_rq) {
-                if (list_empty(&se->ipi_pending_node) && cfs_rq->curr != se) {
-                        list_add_tail(&se->ipi_pending_node, &cfs_rq->ipi_pending_list);
-                        resched_task(cfs_rq->rq->curr);
-                }
-                return 1;
+        if (!force_enqueue) {
+                if (cfs_rq->curr == se)
+                        return 0;       /* not pending */
+                if (!se->on_rq)
+                        return 1;       /* pending */
         }
-        return 0;
+        if (list_empty(&se->ipi_pending_node)) {
+                list_add_tail(&se->ipi_pending_node, &cfs_rq->ipi_pending_list);
+                resched_task(cfs_rq->rq->curr);
+        }
+        return 1;       /* pending */
+
+#if 0   /* grpq: highly-experimental and need to debug: group entity is also enqueued */
+        for (; se; se = se->parent) {
+                se->ipi_pending = type;
+                cfs_rq = se->cfs_rq;
+                if (!force_enqueue && (!se->on_rq || cfs_rq->curr == se))
+                        continue;
+                if (list_empty(&se->ipi_pending_node)) {
+                        list_add_tail(&se->ipi_pending_node, &cfs_rq->ipi_pending_list);
+                        need_resched = 1;
+                }
+        }
+#endif
 }
-void list_add_ipi_pending(struct task_struct *p)
+int list_add_ipi_pending(struct task_struct *p)
 {
         struct rq *rq;
         unsigned long flags;
-        int ret;
+        int pending;
 
         if (!sysctl_kvm_ipi_first)
-                return;
+                return 0;
 
         rq = task_rq_lock(p, &flags);
-        ret = __list_add_ipi_pending(p, KVM_IPI_DIRECT);
+        pending = __list_add_ipi_pending(p, &p->se, KVM_IPI_DIRECT, 0);
         task_rq_unlock(rq, p, &flags); 
 
-        if (sysctl_kvm_ipi_indirect && !ret)  {     /* not on rq */
+        /* below will be deprecated */
+        if (sysctl_kvm_ipi_indirect && !p->se.on_rq)  {     /* not on rq */
                 struct task_struct *owner = get_futex_owner(p);
 
                 if (!owner)
-                        return;
+                        return 0;
 
                 rq = task_rq_lock(owner, &flags);
-                __list_add_ipi_pending(owner, KVM_IPI_INDIRECT);   /* only start point of assigning KVM_IPI_INDIRECT */
+                __list_add_ipi_pending(p, &owner->se, KVM_IPI_INDIRECT, 0);   /* only start point of assigning KVM_IPI_INDIRECT */
                 task_rq_unlock(rq, owner, &flags); 
 
                 trace_sched_ipi_futex(p, owner);
         }
+        return pending;
 }
 EXPORT_SYMBOL_GPL(list_add_ipi_pending);
 
@@ -2135,6 +2151,18 @@ void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nic
         }
 }
 EXPORT_SYMBOL_GPL(update_vcpu_flags);
+
+void vcpu_yield(void)
+{
+	struct rq *rq = this_rq_lock();
+
+	schedstat_inc(rq, yld_count);
+	current->sched_class->yield_task(rq);
+        resched_task(current);
+
+	do_raw_spin_unlock(&rq->lock);
+}
+EXPORT_SYMBOL_GPL(vcpu_yield);
 #endif
 
 #include "sched_idletask.c"

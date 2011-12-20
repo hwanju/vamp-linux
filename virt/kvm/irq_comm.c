@@ -88,6 +88,11 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			kvm_is_dm_lowest_prio(irq))
 		printk(KERN_INFO "kvm: apic: phys broadcast and lowest prio\n");
 
+#ifdef CONFIG_KVM_VDI
+        /* initialize ipi_pending_mask */
+        if (irq->ipi == 1 && irq->vector == 0xe1)
+                cpumask_clear(&src->vcpu->ipi_pending_mask);
+#endif
 	kvm_for_each_vcpu(i, vcpu, kvm) {
 		if (!kvm_apic_present(vcpu))
 			continue;
@@ -101,17 +106,23 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 				r = 0;
 			r += kvm_apic_set_irq(vcpu, irq);
 #ifdef CONFIG_KVM_VDI
-                        if (irq->ipi == 1 && (irq->shorthand == APIC_DEST_ALLBUT || irq->shorthand == APIC_DEST_ALLINC)) {
+                        //if (irq->ipi == 1 && (irq->shorthand == APIC_DEST_ALLBUT || irq->shorthand == APIC_DEST_ALLINC)) {
+                        //if (irq->ipi == 1 && i != src->vcpu->vcpu_id && 
+                        //    irq->vector != 0xfd /* Linux resched */ && irq->vector != 0x2f /* Windows resched */) {
+                        if (irq->ipi == 1 && i != src->vcpu->vcpu_id && (irq->vector == 0xe1)) {
                                 struct task_struct *task = NULL;
                                 struct pid *pid;
+                                int pending;
                                 rcu_read_lock();
                                 pid = rcu_dereference(vcpu->pid);
                                 if (pid)
                                         task = get_pid_task(vcpu->pid, PIDTYPE_PID);
                                 rcu_read_unlock();
                                 if (task) {
-                                        list_add_ipi_pending(task);
+                                        pending = list_add_ipi_pending(task);
                                         put_task_struct(task);
+                                        if (pending)
+                                                cpumask_set_cpu(i, &src->vcpu->ipi_pending_mask);
                                 }
                         }
 #endif
@@ -126,6 +137,11 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 	if (lowest)
 		r = kvm_apic_set_irq(lowest, irq);
 
+#ifdef CONFIG_KVM_VDI
+        if (irq->ipi == 1 && irq->vector == 0xe1 &&
+            !cpumask_empty(&src->vcpu->ipi_pending_mask))
+                vcpu_yield();
+#endif
 	return r;
 }
 

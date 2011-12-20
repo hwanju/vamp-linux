@@ -2732,7 +2732,7 @@ static inline unsigned long rlimit_max(unsigned int limit)
 #define NON_MIXED_INTERACTIVE_PHASE     1
 #define MIXED_INTERACTIVE_PHASE         2
 extern void set_interactive_phase(struct sched_entity *se, int interactive_phase);
-extern void list_add_ipi_pending(struct task_struct *p);
+extern int list_add_ipi_pending(struct task_struct *p);
 
 /* VCPU flags */
 #define VF_SHIFT                16
@@ -2742,6 +2742,7 @@ extern void list_add_ipi_pending(struct task_struct *p);
 #define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
 #define VF_BACKGROUND_ON_RQ     (VF_BACKGROUND  << VF_SHIFT)    /* I'm on runq as an background vcpu (only for se's vcpu_flags) */
 extern void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice);
+extern void vcpu_yield(void);
 extern int get_interactive_count(int cpu);
 extern int find_interactiveless_cpu(int this_cpu, struct task_struct *p);
 #endif

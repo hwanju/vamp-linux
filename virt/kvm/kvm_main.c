@@ -575,12 +575,12 @@ static void kvm_destroy_vm(struct kvm *kvm)
 #else
 	kvm_arch_flush_shadow(kvm);
 #endif
-	kvm_arch_destroy_vm(kvm);
-	kvm_free_physmem(kvm);
-	cleanup_srcu_struct(&kvm->srcu);
 #ifdef CONFIG_KVM_VDI
         exit_kvm_load_monitor(kvm);
 #endif
+	kvm_arch_destroy_vm(kvm);
+	kvm_free_physmem(kvm);
+	cleanup_srcu_struct(&kvm->srcu);
 	kvm_arch_free_vm(kvm);
 	hardware_disable_all();
 	mmdrop(mm);
@@ -1670,6 +1670,9 @@ static int kvm_vm_ioctl_create_vcpu(struct kvm *kvm, u32 id)
 vcpu_destroy:
 	mutex_unlock(&kvm->lock);
 	kvm_arch_vcpu_destroy(vcpu);
+#ifdef CONFIG_KVM_VDI
+        destroy_task_aware_vcpu(vcpu);
+#endif
 	return r;
 }
 

@@ -366,7 +366,6 @@ TRACE_EVENT(kvm_gthread_switch,
         trace_kvm_gthread_switch(1, guest_task_id, vcpu_id, load_idx, cpu_load, flags)
 #define trace_kvm_gthread_switch_depart(guest_task_id, vcpu_id, load_idx, cpu_load, flags) \
         trace_kvm_gthread_switch(0, guest_task_id, vcpu_id, load_idx, cpu_load, flags)
-#endif
 
 TRACE_EVENT(kvm_ui,
 	TP_PROTO(struct kvm *kvm, int event_type, int event_info, unsigned int load_idx),
@@ -565,6 +564,25 @@ TRACE_EVENT(kvm_bg_vcpu,
 	TP_printk("v%d bg_exec_time=%llu exec_time=%llu bg_vcpu_nice=%d", __entry->vcpu_id, 
                 __entry->bg_exec_time, __entry->exec_time, __entry->bg_vcpu_nice)
 );
+
+TRACE_EVENT(kvm_ipi_pending_info,
+        TP_PROTO(int vcpu_id, unsigned long ipi_pending_mask),
+        
+        TP_ARGS(vcpu_id, ipi_pending_mask),
+        
+        TP_STRUCT__entry(
+                __field( int,           vcpu_id         )
+                __field( unsigned long, ipi_pending_mask)
+        ),
+        
+        TP_fast_assign(
+                __entry->vcpu_id                = vcpu_id;
+                __entry->ipi_pending_mask       = ipi_pending_mask;
+        ),
+        
+        TP_printk("vcpu_id=%d ipi_pending_mask=%lx", __entry->vcpu_id, __entry->ipi_pending_mask)
+);
+#endif /* CONFIG_KVM_VDI */
 #endif /* _TRACE_KVM_MAIN_H */
 
 /* This part must be outside protection */

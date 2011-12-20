@@ -181,6 +181,9 @@ struct kvm_vcpu {
         /* time spent waiting on a runqueue */
 	unsigned long long pre_monitor_run_delay, prev_run_delay, run_delay;
         unsigned int reactive_gthread_load;             /* accumulated load of increased guest threads */
+        
+        /* ipi-aware */
+        cpumask_t ipi_pending_mask;
 #endif
 
 	struct kvm_vcpu_arch arch;

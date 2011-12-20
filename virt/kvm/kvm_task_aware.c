@@ -511,7 +511,8 @@ static void load_timer_handler(unsigned long data)
         trace_kvm_load_info(kvm, cur_vm_load, reactive_gtask_load);
 }
 
-static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, unsigned long long now)
+static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, 
+                                       unsigned long long now, int first_sched)
 {
         int bg_nice = get_bg_vcpu_nice(vcpu);
 
@@ -535,21 +536,24 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
 
         if (vcpu->kvm->interactive_phase == MIXED_INTERACTIVE_PHASE &&
             (vcpu->flags != vcpu->cur_guest_task->flags || vcpu->bg_nice != bg_nice)) {
-                struct task_struct *task = NULL;
-                struct pid *pid;
-
                 vcpu->flags = vcpu->cur_guest_task->flags;      /* copy gtask flags to vcpu flags */
                 vcpu->bg_nice = bg_nice;
 
-                rcu_read_lock();
-                pid = rcu_dereference(vcpu->pid);
-                if (pid)
-                        task = get_pid_task(vcpu->pid, PIDTYPE_PID);
-                rcu_read_unlock();
-                if (task) {
-                        update_vcpu_flags(task, vcpu->flags, vcpu->bg_nice);
-                        put_task_struct(task);
+                update_vcpu_flags(current, vcpu->flags, vcpu->bg_nice);
+        }
+
+        /* TODO: optimization! */
+        if (first_sched) {
+                int i;
+                struct kvm_vcpu *iter_vcpu;
+                kvm_for_each_vcpu(i, iter_vcpu, vcpu->kvm) {
+                        if (i == vcpu->vcpu_id)
+                                continue;
+                        cpumask_clear_cpu(vcpu->vcpu_id, &iter_vcpu->ipi_pending_mask);
                 }
+                trace_kvm_ipi_pending_info(vcpu->vcpu_id, vcpu->ipi_pending_mask.bits[0]);
+                if (!cpumask_empty(&vcpu->ipi_pending_mask))
+                        vcpu_yield();
         }
 }
 
@@ -598,7 +602,7 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
 
         /* accounting for arriving */ 
         next = &guest_task->threads[vcpu->vcpu_id];
-        guest_thread_arrive(vcpu, next, now);
+        guest_thread_arrive(vcpu, next, now, 0);
 }
 EXPORT_SYMBOL_GPL(track_guest_task);
 
@@ -628,7 +632,7 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
                 return;
         trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
                         vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state, vcpu->flags);
-        guest_thread_arrive(vcpu, cur_guest_thread, now);
+        guest_thread_arrive(vcpu, cur_guest_thread, now, 1);
 
 #if 0
         if (get_interactive_count(cpu) && !(vcpu->flags & VF_INTERACTIVE)) {
@@ -657,7 +661,7 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
                 set_vcpu_state(vcpu, VCPU_BLOCKED);
 
                 /* cummulative run delay should be invalidated since no longer cpu is needed */
-                ////vcpu->prev_run_delay = vcpu->run_delay;     /* test */
+                vcpu->prev_run_delay = vcpu->run_delay;
         }
         else    /* to wait */
                 set_vcpu_state(vcpu, VCPU_WAITING);
@@ -774,6 +778,7 @@ void exit_kvm_load_monitor(struct kvm *kvm)
         int i;
         struct hlist_node *node, *tmp;
         struct guest_task_struct *guest_task;
+        struct kvm_vcpu *vcpu;
 
         if (!load_monitor_enabled)
                 return;
@@ -788,6 +793,9 @@ void exit_kvm_load_monitor(struct kvm *kvm)
         printk(KERN_INFO "kvm-ta: guest task hash freed\n" );
 
         del_timer_sync(&kvm->load_timer);
+
+        kvm_for_each_vcpu(i, vcpu, kvm)
+                destroy_task_aware_vcpu(vcpu);
 }
 EXPORT_SYMBOL_GPL(exit_kvm_load_monitor);
 

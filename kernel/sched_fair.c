@@ -470,6 +470,8 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	rb_link_node(&se->run_node, parent, link);
 	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);
 #ifdef CONFIG_KVM_VDI
+        if (se->ipi_pending) 
+                __list_add_ipi_pending(entity_is_task(se) ? task_of(se) : NULL, se, se->ipi_pending, 1);
 #if 0   /* vditest */
         if (sysctl_kvm_amvp && !se->ipi_pending && is_interactive_vcpu(se))
                 __list_add_interactive(task_of(se));
@@ -591,6 +593,10 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	u64 slice = __sched_period(cfs_rq->nr_running + !se->on_rq);
 
+#ifdef CONFIG_KVM_VDI
+        //if (unlikely(se->ipi_pending))
+        //        return 100000LL;        /* FIXME: 100us */
+#endif
 	for_each_sched_entity(se) {
 		struct load_weight *load;
 		struct load_weight lw;
@@ -1107,10 +1113,6 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	if (se != cfs_rq->curr)
 		__enqueue_entity(cfs_rq, se);
 	se->on_rq = 1;
-#ifdef CONFIG_KVM_VDI
-        if (se->ipi_pending) 
-                __list_add_ipi_pending(task_of(se), se->ipi_pending);
-#endif
 
 	if (cfs_rq->nr_running == 1)
 		list_add_leaf_cfs_rq(cfs_rq);
@@ -1201,6 +1203,11 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 
 	update_min_vruntime(cfs_rq);
 	update_cfs_shares(cfs_rq);
+#ifdef CONFIG_KVM_VDI
+        /* in case of migration, safely delete from ipi pending list */
+        if (likely(se->ipi_pending_node.next) && !list_empty(&se->ipi_pending_node))
+                list_del_init(&se->ipi_pending_node);
+#endif
 }
 
 /*
@@ -1211,10 +1218,6 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
 	unsigned long ideal_runtime, delta_exec;
 
-#if CONFIG_KVM_VDI
-        if (sysctl_interactive_vcpu_preempt_disable && is_interactive_vcpu(curr))
-                return;
-#endif
 	ideal_runtime = sched_slice(cfs_rq, curr);
 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
 	if (delta_exec > ideal_runtime) {
@@ -1347,6 +1350,11 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 		update_curr(cfs_rq);
 
 	check_spread(cfs_rq, prev);
+#ifdef CONFIG_KVM_VDI
+        if (entity_is_task(prev) || 
+            list_empty(&group_cfs_rq(prev)->ipi_pending_list) /* grpq: highly-experimental, working with __list_add_ipi_pending() commented out*/)
+                prev->ipi_pending = 0;
+#endif
 	if (prev->on_rq) {
 		update_stats_wait_start(cfs_rq, prev);
 		/* Put 'current' back into the tree. */
@@ -1423,9 +1431,9 @@ static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
 	}
 #ifdef CONFIG_KVM_VDI
         /* hwandori-experimental */
-        else if (!list_empty(&cfs_rq->ipi_pending_list) && 
-                        cpu_active(cpu_of(rq)) && hrtimer_is_hres_active(&rq->hrtick_timer)) 
-                hrtick_start(rq, 100000LL);    /* FIXME: 100us */
+        //else if (!list_empty(&cfs_rq->ipi_pending_list) && 
+        //                cpu_active(cpu_of(rq)) && hrtimer_is_hres_active(&rq->hrtick_timer)) 
+        //        hrtick_start(rq, 100000LL);    /* FIXME: 100us */
 #endif
 }
 
@@ -1988,7 +1996,7 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
         /* this check can be done before vdiff comparison, because this condition is always carried out
          * between sibling vcpus where fairness doesn't have to be met */
         if (sysctl_interactive_vcpu_preempt_disable) { /* if the woken task (se) is the first entry in its interactive list */
-                if (is_interactive_vcpu(curr))
+                if (se->is_vcpu && is_interactive_vcpu(curr))
                         return 0;
                 //else if (list_first_entry(&se->cfs_rq->interactive_list, struct sched_entity, interactive_node) == se)
                 //        return 1;
@@ -2130,9 +2138,9 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 	hrtick_start_fair(rq, p);
 
 #ifdef CONFIG_KVM_VDI
-        if (se->cfs_rq->tg != &root_task_group)
-                trace_sched_group_weight(p->tgid, p->pid, se->load.weight, se->cfs_rq->tg->se[cpu_of(rq)]->load.weight, 
-                                se->vruntime, se->cfs_rq->tg->se[cpu_of(rq)]->vruntime);
+        trace_sched_group_weight(p, 
+                se->cfs_rq->tg != &root_task_group ? se->cfs_rq->tg->se[cpu_of(rq)]->load.weight : 0, 
+                se->cfs_rq->tg != &root_task_group ? se->cfs_rq->tg->se[cpu_of(rq)]->vruntime : 0);
 #endif
 	return p;
 }
@@ -2145,10 +2153,6 @@ static void put_prev_task_fair(struct rq *rq, struct task_struct *prev)
 	struct sched_entity *se = &prev->se;
 	struct cfs_rq *cfs_rq;
 
-#ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
-        se->ipi_pending = 0;
-#endif
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		put_prev_entity(cfs_rq, se);

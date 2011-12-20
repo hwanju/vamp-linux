@@ -393,9 +393,9 @@ TRACE_EVENT(sched_pi_setprio,
 #ifdef CONFIG_BALANCE_SCHED
 TRACE_EVENT(sched_group_weight,
 
-	TP_PROTO(unsigned int tgid, int pid, unsigned long weight, unsigned long group_weight, u64 vruntime, u64 group_vruntime),
+	TP_PROTO(struct task_struct *p, unsigned long group_weight, u64 group_vruntime),
 
-	TP_ARGS(tgid, pid, weight, group_weight, vruntime, group_vruntime),
+	TP_ARGS(p, group_weight, group_vruntime),
 
 	TP_STRUCT__entry(
 		__field( unsigned int,  tgid            )
@@ -407,11 +407,11 @@ TRACE_EVENT(sched_group_weight,
 	),
 
 	TP_fast_assign(
-		__entry->tgid           = tgid;
-		__entry->pid            = pid;
-		__entry->weight         = weight;
+		__entry->tgid           = p->tgid;
+		__entry->pid            = p->pid;
+		__entry->weight         = p->se.load.weight;
 		__entry->group_weight   = group_weight;
-		__entry->vruntime       = vruntime;
+		__entry->vruntime       = p->se.vruntime;
 		__entry->group_vruntime = group_vruntime;
 	),
 
