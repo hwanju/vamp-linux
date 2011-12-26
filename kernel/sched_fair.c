@@ -397,18 +397,18 @@ static int rq_has_interactive_vcpu(struct cfs_rq *rq)
         return 0;
 #endif
 }
-static DEFINE_PER_CPU_SHARED_ALIGNED(atomic_t, interactive_count);
+static DEFINE_PER_CPU_SHARED_ALIGNED(int, interactive_count);
 static inline void inc_interactive_count(int cpu)
-{       /* FIXME: why atomic? */
-        atomic_inc(&per_cpu(interactive_count, cpu));
+{
+        per_cpu(interactive_count, cpu)++;
 }
 static inline void dec_interactive_count(int cpu)
 {
-        atomic_dec(&per_cpu(interactive_count, cpu));
+        per_cpu(interactive_count, cpu)--;
 }
 int get_interactive_count(int cpu)
 {
-        return atomic_read(&per_cpu(interactive_count, cpu));
+        return per_cpu(interactive_count, cpu);
 }
 EXPORT_SYMBOL_GPL(get_interactive_count);
 #if 0
@@ -859,13 +859,6 @@ static void update_cfs_load(struct cfs_rq *cfs_rq, int global_update)
 		cfs_rq->load_last = now;
 		cfs_rq->load_avg += delta * load;
 	}
-#if 0 //def CONFIG_KVM_VDI
-        else if (sysctl_sched_aggressive_load && cfs_rq->nr_running_vcpus) {  /* load == 0 */
-		cfs_rq->load_avg = 0;
-		cfs_rq->load_period = 0;
-                update_cfs_rq_load_contribution(cfs_rq, global_update);
-        }
-#endif
 
 	/* consider updating load contribution on each fold or truncate */
 	if (global_update || cfs_rq->load_period > period
@@ -2291,6 +2284,9 @@ migrate_ok:
         if (soft_affinity) {
                 cpu_set(this_cpu, p->cpus_allowed);
                 *all_pinned = 0;
+                trace_balsched_clear_affinity(p, 
+                                p->se.cfs_rq->tg->se[this_cpu]->my_q->nr_running_vcpus, 
+                                p->cpus_allowed.bits[0]); 
         }
 #endif
 	return 1;

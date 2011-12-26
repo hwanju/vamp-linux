@@ -2573,17 +2573,18 @@ not_found:
 }
 
 #ifdef CONFIG_BALANCE_SCHED
-unsigned int __read_mostly sysctl_balsched_load_imbalance_pct = 125;
+unsigned int __read_mostly sysctl_balsched_load_imbalance_pct = 150;
 static inline int cause_load_imbalance(struct task_group *tg, int cpu, 
                 unsigned long weight, unsigned long cur_total_weight)
 {
         unsigned long weight_per_cpu;
         s64 expected_load, cpu_load;
-        if (!is_fair_balsched(tg) || !cur_total_weight || !weighted_cpuload(cpu))
+        if (!is_fair_balsched(tg) || !cur_total_weight || 
+            !weighted_cpuload(cpu) || !sysctl_balsched_load_imbalance_pct)
                 return 0;
         expected_load = effective_load(tg, cpu, weight, weight);
         cpu_load = weighted_cpuload(cpu) + expected_load;
-        cur_total_weight += expected_load;
+        cur_total_weight += expected_load - effective_load(tg, cpu, 0, weight);
         weight_per_cpu = cur_total_weight / num_active_cpus();
         weight_per_cpu *= sysctl_balsched_load_imbalance_pct;
         weight_per_cpu /= 100;
@@ -2660,7 +2661,7 @@ static inline int try_to_balance_affine(struct task_struct *p)
         if (is_fair_balsched(tg)) {
                 cur_total_weight = 0;
                 for_each_cpu(i, cpu_active_mask)
-                        cur_total_weight += weighted_cpuload(i);
+                        cur_total_weight += weighted_cpuload(i) + effective_load(tg, i, 0, se->load.weight);
         }
         if ((tg->balsched == BALSCHED_ALL || tg->balsched == BALSCHED_ALL_FAIR) && likely(!se->on_rq)) {
                 for_each_cpu(i, cpu_active_mask) {
@@ -2703,7 +2704,8 @@ static inline int try_to_balance_affine(struct task_struct *p)
                                                 cpu_set(i, balanced_cpus_allowed);
                                                 affinity_updated = 1;
                                         }
-                                        trace_balsched_cpu_stat(p->tgid, i, load_imbalance, tg->se[i]->my_q->nr_running_vcpus, get_interactive_count(i));
+                                        trace_balsched_cpu_stat(p, i, weighted_cpuload(i), load_imbalance, 
+                                                        tg->se[i]->my_q->nr_running_vcpus, get_interactive_count(i));
                                 }
                         }
                 }
@@ -2717,7 +2719,8 @@ static inline int try_to_balance_affine(struct task_struct *p)
                                 }
                         }
                 }
-                trace_balsched_affinity(p->tgid, affinity_updated, balanced_cpus_allowed.bits[0]);
+                if (se->is_vcpu)
+                        trace_balsched_affinity(p, affinity_updated, balanced_cpus_allowed.bits[0]);
 #if 0
                 /* EXPERIMENTAL */
                 else if (sysctl_balsched_vdi_opt &&
