@@ -326,17 +326,7 @@ struct kvm {
         unsigned int pre_monitor_load;          /* aggregate vcpu load during pre-monitoring period */
         int interactive_phase;                  /* 0: normal phase, NON_MIXED_INTERACTIVE_PHASE: fast path, 
                                                    MIXED_INTERACTIVE_PHASE: slow path */
-
-#if 0
-        /* VLP: VCPU-level Parallelism */
-        int vlp;                /* current vlp */
-        u64 vlp_avg;            /* sum of (vlp * period) during vlp measure period */
-        u64 vlp_period;         /* sum of periods where vlp > 0 (non-idle period) */
-        u64 vlp_timestamp;      /* timestamp at which vlp was changed */
-        cpumask_t vlp_vcpus;    /* vcpus for which vlp is accounted */
-        spinlock_t vlp_lock;
-#endif
-
+        unsigned long system_task_id;
         pid_t vm_id;    /* for tracing (non-mandatory) */
 #endif
 };

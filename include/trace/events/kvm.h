@@ -308,14 +308,13 @@ TRACE_EVENT(
 
 #ifdef CONFIG_KVM_VDI
 TRACE_EVENT(kvm_vcpu_switch,
-	TP_PROTO(int op, int vcpu_id, unsigned int load_idx, u64 cpu_load, int state, unsigned int flags),
-	TP_ARGS(op, vcpu_id, load_idx, cpu_load, state, flags),
+	TP_PROTO(int op, int vcpu_id, u64 schedstat, int state, unsigned int flags),
+	TP_ARGS(op, vcpu_id, schedstat, state, flags),
 
 	TP_STRUCT__entry(
 		__field(	int,		op              )
 		__field(	int,	        vcpu_id		)
-		__field(	unsigned int,   load_idx        )
-		__field(	u64,		cpu_load        )
+		__field(	u64,		schedstat       )
 		__field(	int,	        state           )
 		__field(	unsigned int,   flags           )
 	),
@@ -323,19 +322,18 @@ TRACE_EVENT(kvm_vcpu_switch,
 	TP_fast_assign(
 		__entry->op             = op;
 		__entry->vcpu_id        = vcpu_id;
-		__entry->load_idx       = load_idx;
-		__entry->cpu_load       = cpu_load;
+		__entry->schedstat      = schedstat;
 		__entry->state          = state;
 		__entry->flags          = flags;
 	),
 
-	TP_printk("%s v%d load_idx=%u cpu_load=%llu state=%d flags=%u", __entry->op ? "arrive" : "depart", 
-                  __entry->vcpu_id, __entry->load_idx, __entry->cpu_load, __entry->state, __entry->flags)
+	TP_printk("%s v%d %s=%llu state=%d flags=%u", __entry->op ? "arrive" : "depart", __entry->vcpu_id,
+                __entry->op ? "run_delay" : "exec_time", __entry->schedstat, __entry->state, __entry->flags)
 );
-#define trace_kvm_vcpu_switch_arrive(vcpu_id, load_idx, cpu_load, state, flags) \
-        trace_kvm_vcpu_switch(1, vcpu_id, load_idx, cpu_load, state, flags)
-#define trace_kvm_vcpu_switch_depart(vcpu_id, load_idx, cpu_load, state, flags) \
-        trace_kvm_vcpu_switch(0, vcpu_id, load_idx, cpu_load, state, flags)
+#define trace_kvm_vcpu_switch_arrive(vcpu_id, schedstat, state, flags) \
+        trace_kvm_vcpu_switch(1, vcpu_id, schedstat, state, flags)
+#define trace_kvm_vcpu_switch_depart(vcpu_id, schedstat, state, flags) \
+        trace_kvm_vcpu_switch(0, vcpu_id, schedstat, state, flags)
 
 TRACE_EVENT(kvm_gthread_switch,
 	TP_PROTO(int op, unsigned long guest_task_id, int vcpu_id, unsigned int load_idx, u64 cpu_load, unsigned int flags),
@@ -581,6 +579,27 @@ TRACE_EVENT(kvm_ipi_pending_info,
         ),
         
         TP_printk("vcpu_id=%d ipi_pending_mask=%lx", __entry->vcpu_id, __entry->ipi_pending_mask)
+);
+
+TRACE_EVENT(kvm_system_task,
+        TP_PROTO(int vcpu_id, unsigned long system_task_id, unsigned long cur_task_id),
+
+        TP_ARGS(vcpu_id, system_task_id, cur_task_id),
+
+        TP_STRUCT__entry(
+                __field( int,   vcpu_id)
+                __field( unsigned long, system_task_id)
+                __field( unsigned long, cur_task_id)
+        ),
+
+        TP_fast_assign(
+                __entry->vcpu_id        = vcpu_id;
+                __entry->system_task_id = system_task_id;
+                __entry->cur_task_id    = cur_task_id;
+        ),
+
+        TP_printk("vcpu_id=%d system_task_id=%lu cur_task_id=%lu",
+                __entry->vcpu_id, __entry->system_task_id, __entry->cur_task_id)
 );
 #endif /* CONFIG_KVM_VDI */
 #endif /* _TRACE_KVM_MAIN_H */

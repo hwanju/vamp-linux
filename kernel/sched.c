@@ -347,7 +347,6 @@ struct cfs_rq {
 	struct list_head *balance_iterator;
 #ifdef CONFIG_KVM_VDI
 	struct list_head ipi_pending_list;
-	struct list_head interactive_list;
         unsigned long nr_running_bg_vcpus; 
 #endif
 
@@ -2063,7 +2062,6 @@ void set_interactive_phase(struct sched_entity *se, int interactive_phase)
 }
 EXPORT_SYMBOL_GPL(set_interactive_phase);
 
-/* hwandori-experimental: below two functions - FIXME: -> static */
 unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
 unsigned int __read_mostly sysctl_kvm_ipi_indirect = 0;
 unsigned int __read_mostly sysctl_balsched_vdi_opt = 0;
@@ -2071,26 +2069,8 @@ unsigned int __read_mostly sysctl_kvm_amvp         = 0;
 EXPORT_SYMBOL_GPL(sysctl_kvm_amvp);
 
 #include <linux/futex.h>
-int __list_add_ipi_pending(struct task_struct *p /*FIXME: p is for debugging-only*/, struct sched_entity *se, int type, int force_enqueue)
+int __list_add_ipi_pending(struct task_struct *p, struct sched_entity *se, int type, int force_enqueue)
 {
-#if 0   /* original code */
-        struct cfs_rq *cfs_rq = se->cfs_rq;
-
-        se->ipi_pending = type;
-        if (!force_enqueue) {
-                if (cfs_rq->curr == se)
-                        return 0;       /* not pending */
-                if (!se->on_rq)
-                        return 1;       /* pending */
-        }
-        if (list_empty(&se->ipi_pending_node)) {
-                list_add_tail(&se->ipi_pending_node, &cfs_rq->ipi_pending_list);
-                resched_task(cfs_rq->rq->curr);
-        }
-        return 1;       /* pending */
-#endif
-
-//#if 0   /* grpq: highly-experimental and need to debug: group entity is also enqueued */
         struct cfs_rq *cfs_rq = se->cfs_rq;
         int need_resched = 0;
 
@@ -2112,7 +2092,6 @@ int __list_add_ipi_pending(struct task_struct *p /*FIXME: p is for debugging-onl
         if (need_resched && !cfs_rq->rq->curr->se.ipi_pending)
                 resched_task(cfs_rq->rq->curr);
         return 1;
-//#endif
 }
 int list_add_ipi_pending(struct task_struct *p)
 {
@@ -2143,15 +2122,6 @@ int list_add_ipi_pending(struct task_struct *p)
         return pending;
 }
 EXPORT_SYMBOL_GPL(list_add_ipi_pending);
-
-void __list_add_interactive(struct task_struct *p)
-{
-        struct sched_entity *se = &p->se;
-        struct cfs_rq *cfs_rq = se->cfs_rq;
-
-        if (list_empty(&se->interactive_node))
-                list_add_tail(&se->interactive_node, &cfs_rq->interactive_list);
-}
 
 void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
 {
@@ -2607,57 +2577,7 @@ static inline int cause_load_imbalance(struct task_group *tg, int cpu,
 
         return cpu_load > weight_per_cpu;
 }
-int find_interactiveless_cpu(int this_cpu, struct task_struct *p)
-{
-        int i;
-        struct sched_entity *se = &p->se;
-        struct task_group *tg = se->cfs_rq->tg;
-        unsigned long weight = se->load.weight;
-        s64 this_load = weighted_cpuload(this_cpu);
-        s64 dest_load;
-        u64 min_load = -1UL;
-        int min_load_cpu = -1;
 
-        /* FIXME: assume a vcpu does not have mixed workloads currently */
-        if (tg->interactive_phase)
-                return -1;
-        
-        this_load += effective_load(tg, this_cpu, -weight, 0);
-        trace_sched_interactive_load(this_cpu, 1, this_load, get_interactive_count(this_cpu));
-
-        for_each_cpu(i, cpu_active_mask) {
-                if (i == this_cpu)
-                        continue;
-                dest_load = weighted_cpuload(i) + effective_load(tg, i, weight, 0);
-                if (dest_load < min_load && !get_interactive_count(i)) {
-                        min_load = dest_load;
-                        min_load_cpu = i;
-                }
-                trace_sched_interactive_load(i, 0, dest_load, get_interactive_count(i));
-        }
-        return min_load_cpu;
-}
-EXPORT_SYMBOL_GPL(find_interactiveless_cpu);
-
-static inline unsigned long group_weight_ratio(struct task_group *tg, int cpu, unsigned long weight)
-{
-        unsigned int scale = 10;
-	unsigned long group_weight = tg->se[cpu]->load.weight;
-        unsigned long others_weight = weighted_cpuload(cpu) - group_weight;
-	struct rq *rq = cpu_rq(cpu);
-
-        if (rq->curr == rq->idle)
-                return 0;
-
-        group_weight += effective_load(tg, cpu, weight, weight);
-        group_weight <<= scale;
-
-        //printk("[DEBUG] cpu%d weight=%lu group_weight=%lu (old=%lu) / others_weight=%lu (total=%lu) ratio=%lu\n",
-        //                cpu, weight, group_weight >> scale, tg->se[cpu]->load.weight, others_weight, weighted_cpuload(cpu), 
-        //                group_weight / (others_weight + 1));
-
-        return group_weight / (others_weight + 1);
-}
 static inline int try_to_balance_affine(struct task_struct *p)
 {
         int i; 
@@ -2673,7 +2593,6 @@ static inline int try_to_balance_affine(struct task_struct *p)
 
         cpus_clear(balanced_cpus_allowed);
         if (is_fair_balsched(tg)) {
-                cur_total_weight = 0;
                 for_each_cpu(i, cpu_active_mask)
                         cur_total_weight += weighted_cpuload(i) + effective_load(tg, i, 0, se->load.weight);
         }
@@ -2707,11 +2626,11 @@ static inline int try_to_balance_affine(struct task_struct *p)
                 }
         }
         else if (tg->balsched == BALSCHED_VCPUS_FAIR && likely(!se->on_rq)) {
+                int load_imbalance = 0;
                 if (se->is_vcpu && !tg->interactive_phase) {
                         for_each_cpu(i, cpu_active_mask) {
                                 /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
                                 if (likely(tg->se[i] && tg->se[i]->my_q)) {
-                                        int load_imbalance = 0;
                                         if (!tg->se[i]->my_q->nr_running_vcpus &&
                                             !(load_imbalance = cause_load_imbalance(tg, i, se->load.weight, cur_total_weight)) &&
                                             !get_interactive_count(i)) {
@@ -2723,37 +2642,23 @@ static inline int try_to_balance_affine(struct task_struct *p)
                                 }
                         }
                 }
-                else if (sysctl_balsched_vdi_opt && sysctl_kvm_amvp && tg->interactive_phase == MIXED_INTERACTIVE_PHASE) {
+                else if (sysctl_balsched_vdi_opt && sysctl_kvm_amvp && 
+                         tg->interactive_phase == MIXED_INTERACTIVE_PHASE) {
                         for_each_cpu(i, cpu_active_mask) {
                                 if (likely(tg->se[i] && tg->se[i]->my_q) && 
-                                                ((is_interactive_vcpu(se) && !tg->se[i]->my_q->nr_running_bg_vcpus) ||
-                                                (!is_interactive_vcpu(se) && tg->se[i]->my_q->nr_running_bg_vcpus))) {
+                                    ((is_interactive_vcpu(se) && !tg->se[i]->my_q->nr_running_bg_vcpus) ||
+                                    (!is_interactive_vcpu(se) && tg->se[i]->my_q->nr_running_bg_vcpus)) &&
+                                    !(load_imbalance = cause_load_imbalance(tg, i, se->load.weight, cur_total_weight))) {
                                         cpu_set(i, balanced_cpus_allowed);
                                         affinity_updated = 1;
                                 }
+                                trace_balsched_cpu_stat(p, i, weighted_cpuload(i), load_imbalance, 
+                                                tg->se[i]->my_q->nr_running_bg_vcpus, get_interactive_count(i));
                         }
                 }
                 if (se->is_vcpu)
                         trace_balsched_affinity(p, affinity_updated, balanced_cpus_allowed.bits[0]);
-#if 0
-                /* EXPERIMENTAL */
-                else if (sysctl_balsched_vdi_opt &&
-                         tg->interactive_phase) {
-                         //tg->interactive_phase && (!se->is_vcpu || !(se->vcpu_flags & VF_INTERACTIVE))) {
-                        unsigned long gw_ratio, max_gw_ratio = 0;
-                        for_each_cpu(i, cpu_active_mask) {
-                                gw_ratio = group_weight_ratio(tg, i, se->load.weight);
-                                if (gw_ratio == 0) {
-                                        selected_cpu = -1;
-                                        break;
-                                }
-                                else if (gw_ratio > max_gw_ratio) {
-                                        max_gw_ratio = gw_ratio;
-                                        selected_cpu = i;
-                                }
-                        }
-                }
-#endif
+
                 /* if no idle cpu exists, return the affinity to all cpus */
                 if (!affinity_updated) {
                         cpus_setall(balanced_cpus_allowed);
@@ -3182,7 +3087,6 @@ static void __sched_fork(struct task_struct *p)
 	INIT_LIST_HEAD(&p->se.group_node);
 #ifdef CONFIG_KVM_VDI
 	INIT_LIST_HEAD(&p->se.ipi_pending_node);
-	INIT_LIST_HEAD(&p->se.interactive_node);
 #endif
 
 #ifdef CONFIG_SCHEDSTATS
@@ -8286,7 +8190,6 @@ static void init_cfs_rq(struct cfs_rq *cfs_rq, struct rq *rq)
 	INIT_LIST_HEAD(&cfs_rq->tasks);
 #ifdef CONFIG_KVM_VDI
 	INIT_LIST_HEAD(&cfs_rq->ipi_pending_list);
-	INIT_LIST_HEAD(&cfs_rq->interactive_list);
 #endif
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	cfs_rq->rq = rq;

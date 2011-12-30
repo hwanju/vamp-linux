@@ -7,7 +7,6 @@
 #include <linux/timer.h>
 #include <linux/sched.h>
 
-/* FIXME: mb must be required? */
 #define set_guest_thread_state(guest_thread, state_value)     \
         set_mb(guest_thread->state, (state_value))
 
@@ -197,6 +196,29 @@ static inline unsigned long get_cur_guest_task_id(struct kvm_vcpu *vcpu)
         return vcpu->cur_guest_task->id;
 }
 
+/*
+ * this function is called at hlt vmexit.
+ * check the current gtask at hlt vmexit and if diverged, assume no system task in this vm.
+ * e.g., Linux has an idle thread who doesn't need address space switching, whereas 
+ * Windows has a separate system task
+ */
+#define is_system_task(kvm, gtask)   (kvm->system_task_id == gtask->id)
+void check_system_task(struct kvm_vcpu *vcpu)
+{
+        struct kvm *kvm = vcpu->kvm;
+
+        if (!vcpu->cur_guest_task)
+                return;
+
+        if (kvm->system_task_id == 0)          /* first set */
+                kvm->system_task_id = vcpu->cur_guest_task->id;
+        else if (kvm->system_task_id > 0 && 
+                        kvm->system_task_id != vcpu->cur_guest_task->id)
+                kvm->system_task_id = -1;      /* if diverged, assume no system task */
+        trace_kvm_system_task(vcpu->vcpu_id, kvm->system_task_id, vcpu->cur_guest_task->id);
+}
+EXPORT_SYMBOL_GPL(check_system_task);
+
 static inline void init_load_monitor(void)
 {
         int i;
@@ -300,8 +322,8 @@ module_param(load_delta_thresh_pct, int, 0644);
 static unsigned int bg_load_thresh_pct = DEFAULT_BG_LOAD_THRESH_PCT;
 module_param(bg_load_thresh_pct, uint, 0644);
 
-#define DEFAULT_MAX_UI_MONITOR_PERIOID  40      /* FIXME: this value depends on ui period */
-static unsigned int max_ui_monitor_period = DEFAULT_MAX_UI_MONITOR_PERIOID;
+#define DEFAULT_MAX_UI_MONITOR_PERIOD  40      /* FIXME: this value depends on ui period */
+static unsigned int max_ui_monitor_period = DEFAULT_MAX_UI_MONITOR_PERIOD;
 module_param(max_ui_monitor_period, uint, 0644);
 
 #define DEFAULT_AMVP_MONITOR_WINDOW     30000000UL      /* 30ms */
@@ -373,7 +395,8 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now, un
                         /* update gtask flags for background tasks */
                         iter_guest_task->flags = 0;
                         if (kvm->interactive_phase == MIXED_INTERACTIVE_PHASE &&
-                                        iter_guest_task->pre_monitor_load > 10 && iter_guest_task->id != 0x00187)     /* FIXME: hardcoded 10 */
+                                        iter_guest_task->pre_monitor_load > 10 &&     /* FIXME: hardcoded 10 */ 
+                                        !is_system_task(kvm, iter_guest_task))
                                 iter_guest_task->flags |= VF_BACKGROUND;
                         
                         if (valid_load_task)
@@ -621,8 +644,7 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
         unsigned long long now = sched_clock();
 
         /* run_delay (wait time) accounting */
-        if (vcpu->state == VCPU_WAITING)
-                vcpu->run_delay += (now - vcpu->last_depart);
+        vcpu->run_delay = current->se.statistics.wait_sum;
         set_vcpu_state(vcpu, VCPU_RUNNING);
 
         /* recording for arrival */ 
@@ -630,21 +652,8 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
         cur_guest_thread = get_cur_guest_thread(vcpu);
         if (unlikely(!cur_guest_thread))
                 return;
-        trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
-                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state, vcpu->flags);
+        trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, vcpu->run_delay, vcpu->state, vcpu->flags);
         guest_thread_arrive(vcpu, cur_guest_thread, now, 1);
-
-#if 0
-        if (get_interactive_count(cpu) && !(vcpu->flags & VF_INTERACTIVE)) {
-                cpumask_t cpus_to_run;
-                interactive_friendly_cpu = find_interactiveless_cpu(cpu, current);
-                if (interactive_friendly_cpu >= 0) {
-                        cpus_setall(cpus_to_run);
-                        cpu_clear(vcpu->cpu, cpus_to_run);
-                        set_cpus_allowed_ptr(current, &cpus_to_run);
-                }
-        }
-#endif
 }
 
 /*
@@ -660,7 +669,7 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
         if (likely(vcpu->state == VCPU_RUNNING) && !current->se.on_rq) {        /* to be blocked */
                 set_vcpu_state(vcpu, VCPU_BLOCKED);
 
-                /* cummulative run delay should be invalidated since no longer cpu is needed */
+                /* cummulative run delay should be reset since no longer cpu is needed */
                 vcpu->prev_run_delay = vcpu->run_delay;
         }
         else    /* to wait */
@@ -672,8 +681,7 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
                 return;
         guest_thread_depart(vcpu, cur_guest_thread, now);
 
-        trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, load_idx(vcpu->load_epoch_id), 
-                        vcpu->cpu_loads[load_idx(vcpu->load_epoch_id)], vcpu->state, vcpu->flags);
+        trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, now - vcpu->last_arrival, vcpu->state, vcpu->flags);
 
         while (vcpu->exec_time > amvp_monitor_window) {
                 /* borrowed code from update_cfs_load */

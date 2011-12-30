@@ -2021,9 +2021,8 @@ static inline unsigned int get_sysctl_timer_migration(void)
 /* parameters */
 extern unsigned int sysctl_kvm_ipi_first;
 extern unsigned int sysctl_kvm_ipi_indirect;
-extern unsigned int sysctl_sched_interactive_preempt;
-extern unsigned int sysctl_interactive_vcpu_preempt_disable;
-extern unsigned int sysctl_sched_aggressive_load;
+extern unsigned int sysctl_kvm_inter_vm_preempt;
+extern unsigned int sysctl_kvm_intra_vm_preempt;
 extern unsigned int sysctl_balsched_vdi_opt;
 extern unsigned int sysctl_kvm_amvp;
 #endif

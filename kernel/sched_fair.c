@@ -91,15 +91,15 @@ unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
 #ifdef CONFIG_KVM_VDI
 #include <linux/kvm_task_aware.h>
 
-unsigned int __read_mostly sysctl_sched_interactive_preempt = 0;
-unsigned int __read_mostly sysctl_interactive_vcpu_preempt_disable = 0;
+unsigned int __read_mostly sysctl_kvm_ipi_tslice_ns    = 100000UL;      /* default 100us */
+unsigned int __read_mostly sysctl_kvm_inter_vm_preempt = 0;
+unsigned int __read_mostly sysctl_kvm_intra_vm_preempt = 0;
 
 static inline int is_interactive_vcpu(struct sched_entity *se)
 {
         return (se->is_vcpu &&
                 (se->cfs_rq->tg->interactive_phase == NON_MIXED_INTERACTIVE_PHASE ||
-                 (se->cfs_rq->tg->interactive_phase == MIXED_INTERACTIVE_PHASE && !(se->vcpu_flags & VF_BACKGROUND)))) ||
-                 //(se->cfs_rq->tg->interactive_phase == MIXED_INTERACTIVE_PHASE && se->vcpu_flags & VF_INTERACTIVE))) ||
+                (se->cfs_rq->tg->interactive_phase == MIXED_INTERACTIVE_PHASE && !(se->vcpu_flags & VF_BACKGROUND)))) ||
                (se->cfs_rq->tg->interactive_phase && !se->is_vcpu);
 }
 #endif
@@ -383,19 +383,12 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 
 #ifdef CONFIG_KVM_VDI
 #include <linux/kvm_task_aware.h>
-static int rq_has_interactive_vcpu(struct cfs_rq *rq)
+static int is_interactive_phase(struct cfs_rq *rq)
 {
         if (unlikely(!rq))
                 return 0;
 
         return rq->tg->interactive_phase;
-#if 0
-	list_for_each_entry(p, &rq->tasks, se.group_node) {
-                if (p->se.vcpu_flags & VF_INTERACTIVE)
-                        return 1;
-        }
-        return 0;
-#endif
 }
 static DEFINE_PER_CPU_SHARED_ALIGNED(int, interactive_count);
 static inline void inc_interactive_count(int cpu)
@@ -411,24 +404,6 @@ int get_interactive_count(int cpu)
         return per_cpu(interactive_count, cpu);
 }
 EXPORT_SYMBOL_GPL(get_interactive_count);
-#if 0
-int cpu_has_interactive_vcpu(int cpu)
-{
-        struct cfs_rq *cfs_rq;
-        struct rq *rq = cpu_rq(cpu);
-
-        rcu_read_lock();
-        for_each_leaf_cfs_rq(rq, cfs_rq) {
-                if (/*atomic_read(&cfs_rq->tg->interactive_count) &&*/ rq_has_interactive_vcpu(cfs_rq)) {
-                        rcu_read_unlock();
-                        return 1;
-                }
-        }
-        rcu_read_unlock();
-        return 0;
-}
-EXPORT_SYMBOL_GPL(cpu_has_interactive_vcpu);
-#endif
 #endif
 
 /*
@@ -472,10 +447,6 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 #ifdef CONFIG_KVM_VDI
         if (se->ipi_pending) 
                 __list_add_ipi_pending(entity_is_task(se) ? task_of(se) : NULL, se, se->ipi_pending, 1);
-#if 0   /* vditest */
-        if (sysctl_kvm_amvp && !se->ipi_pending && is_interactive_vcpu(se))
-                __list_add_interactive(task_of(se));
-#endif
 #endif
 }
 
@@ -1299,17 +1270,12 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
         list_for_each_entry_safe(p, n, &cfs_rq->ipi_pending_list, ipi_pending_node) {
                 trace_ipi_list_debug(3, entity_is_task(p) ? task_of(p) : NULL, se->cfs_rq->rq->cpu, p->on_rq, cfs_rq_of(p) == cfs_rq);
                 list_del_init(&p->ipi_pending_node);
-                if (p->on_rq && cfs_rq_of(p) == cfs_rq && (entity_is_task(p) || p->vruntime - se->vruntime < sysctl_sched_latency)) {
+                if (p->on_rq && cfs_rq_of(p) == cfs_rq &&
+                   (entity_is_task(p) || p->vruntime - left->vruntime < sysctl_sched_latency)) { /* FIXME: additional param */
                         trace_ipi_list_debug(4, entity_is_task(p) ? task_of(p) : NULL, 
                                         se->cfs_rq->rq->cpu, p->vruntime - cfs_rq->min_vruntime, p->vruntime - se->vruntime);
                         return p;
                 }
-        }
-
-        list_for_each_entry_safe(p, n, &cfs_rq->interactive_list, interactive_node) {
-                list_del_init(&p->interactive_node);
-                if (p->on_rq && cfs_rq_of(p) == cfs_rq)
-                        return p;
         }
 #endif
 	/*
@@ -1351,7 +1317,7 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 	check_spread(cfs_rq, prev);
 #ifdef CONFIG_KVM_VDI
         if (entity_is_task(prev) || 
-            list_empty(&group_cfs_rq(prev)->ipi_pending_list) /* grpq: highly-experimental, working with __list_add_ipi_pending() commented out*/)
+            list_empty(&group_cfs_rq(prev)->ipi_pending_list))
                 prev->ipi_pending = 0;
 #endif
 	if (prev->on_rq) {
@@ -1429,11 +1395,9 @@ static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
 		hrtick_start(rq, delta);
 	}
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
-        //else if (!list_empty(&cfs_rq->ipi_pending_list) && 
         else if (se->ipi_pending && 
                         cpu_active(cpu_of(rq)) && hrtimer_is_hres_active(&rq->hrtick_timer)) 
-                hrtick_start(rq, 100000LL);    /* FIXME: 100us */
+                hrtick_start(rq, sysctl_kvm_ipi_tslice_ns);
 #endif
 }
 
@@ -1997,20 +1961,16 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
                 return 0;
         /* this check can be done before vdiff comparison, because this condition is always carried out
          * between sibling vcpus where fairness doesn't have to be met */
-        if (sysctl_interactive_vcpu_preempt_disable) {
-                if (!is_interactive_vcpu(curr) && is_interactive_vcpu(se))
-                        return 1;
-        }
+        if (sysctl_kvm_intra_vm_preempt &&
+            !is_interactive_vcpu(curr) && is_interactive_vcpu(se))
+                return 1;
 #endif
 	if (vdiff <= 0)
 		return -1;
 #ifdef CONFIG_KVM_VDI
-        if (sysctl_sched_interactive_preempt) {
-                if (!rq_has_interactive_vcpu(curr->my_q) && rq_has_interactive_vcpu(se->my_q))
-                        return 1;
-                //else if (rq_has_interactive_vcpu(curr->my_q))
-                //        return 0;
-        }
+        if (sysctl_kvm_inter_vm_preempt &&
+            !is_interactive_phase(curr->my_q) && is_interactive_phase(se->my_q))
+                return 1;
 #endif
 
 	gran = wakeup_gran(curr, se);
@@ -2293,6 +2253,7 @@ migrate_ok:
                 *all_pinned = 0;
                 trace_balsched_clear_affinity(p, 
                                 p->se.cfs_rq->tg->se[this_cpu]->my_q->nr_running_vcpus, 
+                                p->se.cfs_rq->tg->se[this_cpu]->my_q->nr_running_bg_vcpus, 
                                 p->cpus_allowed.bits[0]); 
         }
 #endif

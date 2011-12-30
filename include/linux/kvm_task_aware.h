@@ -31,6 +31,12 @@ extern unsigned int load_period_shift;
 #define VCPU_WAITING    1 
 #define VCPU_RUNNING    2
 
+/* OS-aware */
+#define has_system_task(kvm)            (kvm->system_task_id > 0)    
+#define is_windows_os(kvm)              has_system_task(kvm)
+#define is_unix_os(kvm)                 (!is_windows_os(kvm))
+#define is_sync_ipi(kvm, vector)        (is_windows_os(kvm) && vector == 0xe1)
+
 struct guest_thread_info {
         volatile long state;            /* 0 = not running, 2 = running */
         int cpu;                        /* physical cpu id hosting this vcpu */
@@ -60,4 +66,5 @@ void destroy_task_aware_vcpu(struct kvm_vcpu *vcpu);
 int init_task_aware_agent(void);
 void destroy_task_aware_agent(void);
 void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id);
+void check_system_task(struct kvm_vcpu *vcpu);
 #endif

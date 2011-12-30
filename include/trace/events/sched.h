@@ -494,14 +494,15 @@ TRACE_EVENT(balsched_cpu_load,
                        __entry->cpu, __entry->weight, __entry->expected_load, __entry->cur_total_weight, __entry->cpu_load, __entry->weight_per_cpu)
 )
 TRACE_EVENT(balsched_clear_affinity,
-        TP_PROTO(struct task_struct *p, int nr_running_vcpus, unsigned long cpu_allowed_mask),
+        TP_PROTO(struct task_struct *p, int nr_running_vcpus, int nr_running_bg_vcpus, unsigned long cpu_allowed_mask),
 
-        TP_ARGS(p, nr_running_vcpus, cpu_allowed_mask),
+        TP_ARGS(p, nr_running_vcpus, nr_running_vcpus, cpu_allowed_mask),
 
         TP_STRUCT__entry(
                 __field( int,   tgid)
                 __field( int,   pid)
                 __field( int,   nr_running_vcpus)
+                __field( int,   nr_running_bg_vcpus)
                 __field( unsigned long, cpu_allowed_mask)
         ),
 
@@ -509,11 +510,12 @@ TRACE_EVENT(balsched_clear_affinity,
                 __entry->tgid   = p->tgid;
                 __entry->pid    = p->pid;
                 __entry->nr_running_vcpus       = nr_running_vcpus;
+                __entry->nr_running_bg_vcpus    = nr_running_bg_vcpus;
                 __entry->cpu_allowed_mask       = cpu_allowed_mask;
         ),
 
-        TP_printk("tgid=%d pid=%d nr_running_vcpus=%d cpu_allowed_mask=%lx",
-                        __entry->tgid, __entry->pid, __entry->nr_running_vcpus, __entry->cpu_allowed_mask)
+        TP_printk("tgid=%d pid=%d nr_running_vcpus=%d nr_running_bg_vcpus=%d cpu_allowed_mask=%lx",
+                        __entry->tgid, __entry->pid, __entry->nr_running_vcpus, __entry->nr_running_bg_vcpus, __entry->cpu_allowed_mask)
 )
 #endif
 #ifdef CONFIG_KVM_VDI   /* hwandori-experimental */

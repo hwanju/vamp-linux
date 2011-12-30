@@ -374,8 +374,8 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 	{
-		.procname	= "sched_interactive_preempt",
-		.data		= &sysctl_sched_interactive_preempt,
+		.procname	= "kvm_inter_vm_preempt",
+		.data		= &sysctl_kvm_inter_vm_preempt,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -383,8 +383,8 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 	{
-		.procname	= "interactive_vcpu_preempt_disable",
-		.data		= &sysctl_interactive_vcpu_preempt_disable,
+		.procname	= "kvm_intra_vm_preempt",
+		.data		= &sysctl_kvm_intra_vm_preempt,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
