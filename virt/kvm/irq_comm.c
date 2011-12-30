@@ -139,8 +139,10 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 
 #ifdef CONFIG_KVM_VDI
         if (irq->ipi == 1 && irq->vector == 0xe1 &&
-            !cpumask_empty(&src->vcpu->ipi_pending_mask))
+            !cpumask_empty(&src->vcpu->ipi_pending_mask)) {
+                trace_kvm_ipi_pending_info(src->vcpu->vcpu_id, src->vcpu->ipi_pending_mask.bits[0]);
                 vcpu_yield();
+        }
 #endif
 	return r;
 }

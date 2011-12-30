@@ -2068,10 +2068,12 @@ unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
 unsigned int __read_mostly sysctl_kvm_ipi_indirect = 0;
 unsigned int __read_mostly sysctl_balsched_vdi_opt = 0;
 unsigned int __read_mostly sysctl_kvm_amvp         = 0;
+EXPORT_SYMBOL_GPL(sysctl_kvm_amvp);
 
 #include <linux/futex.h>
 int __list_add_ipi_pending(struct task_struct *p /*FIXME: p is for debugging-only*/, struct sched_entity *se, int type, int force_enqueue)
 {
+#if 0   /* original code */
         struct cfs_rq *cfs_rq = se->cfs_rq;
 
         se->ipi_pending = type;
@@ -2086,19 +2088,31 @@ int __list_add_ipi_pending(struct task_struct *p /*FIXME: p is for debugging-onl
                 resched_task(cfs_rq->rq->curr);
         }
         return 1;       /* pending */
+#endif
 
-#if 0   /* grpq: highly-experimental and need to debug: group entity is also enqueued */
+//#if 0   /* grpq: highly-experimental and need to debug: group entity is also enqueued */
+        struct cfs_rq *cfs_rq = se->cfs_rq;
+        int need_resched = 0;
+
+        if (!force_enqueue && cfs_rq->curr == se)       /* assert se is task */
+                return 0;       /* delivered promptly (not pending) */
+
         for (; se; se = se->parent) {
                 se->ipi_pending = type;
                 cfs_rq = se->cfs_rq;
+                trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, cfs_rq->curr != se);
                 if (!force_enqueue && (!se->on_rq || cfs_rq->curr == se))
                         continue;
+                trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, list_empty(&se->ipi_pending_node));
                 if (list_empty(&se->ipi_pending_node)) {
                         list_add_tail(&se->ipi_pending_node, &cfs_rq->ipi_pending_list);
                         need_resched = 1;
                 }
         }
-#endif
+        if (need_resched && !cfs_rq->rq->curr->se.ipi_pending)
+                resched_task(cfs_rq->rq->curr);
+        return 1;
+//#endif
 }
 int list_add_ipi_pending(struct task_struct *p)
 {
@@ -2143,9 +2157,9 @@ void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nic
 {
         p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
 
-        if (sysctl_kvm_amvp) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
+        if (sysctl_kvm_amvp && !p->se.ipi_pending) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
                 if (new_flags & VF_BACKGROUND)
-                        set_user_nice(p, sysctl_kvm_amvp > 19 ? bg_nice : sysctl_kvm_amvp);
+                        set_user_nice(p, bg_nice);
                 else
                         set_user_nice(p, 0);
         }
@@ -8346,6 +8360,9 @@ static void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
 	se->my_q = cfs_rq;
 	update_load_set(&se->load, 0);
 	se->parent = parent;
+#ifdef CONFIG_KVM_VDI
+	INIT_LIST_HEAD(&se->ipi_pending_node);
+#endif
 }
 #endif
 

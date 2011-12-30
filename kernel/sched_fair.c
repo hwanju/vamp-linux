@@ -593,10 +593,6 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	u64 slice = __sched_period(cfs_rq->nr_running + !se->on_rq);
 
-#ifdef CONFIG_KVM_VDI
-        //if (unlikely(se->ipi_pending))
-        //        return 100000LL;        /* FIXME: 100us */
-#endif
 	for_each_sched_entity(se) {
 		struct load_weight *load;
 		struct load_weight lw;
@@ -1198,8 +1194,10 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	update_cfs_shares(cfs_rq);
 #ifdef CONFIG_KVM_VDI
         /* in case of migration, safely delete from ipi pending list */
-        if (likely(se->ipi_pending_node.next) && !list_empty(&se->ipi_pending_node))
+        if (likely(se->ipi_pending_node.next) && !list_empty(&se->ipi_pending_node)) {
+                trace_ipi_list_debug(2, entity_is_task(se) ? task_of(se) : NULL, se->cfs_rq->rq->cpu, 1, 1);
                 list_del_init(&se->ipi_pending_node);
+        }
 #endif
 }
 
@@ -1211,6 +1209,10 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
 	unsigned long ideal_runtime, delta_exec;
 
+#ifdef CONFIG_KVM_VDI
+        if (curr->ipi_pending)
+		resched_task(rq_of(cfs_rq)->curr);
+#endif
 	ideal_runtime = sched_slice(cfs_rq, curr);
 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
 	if (delta_exec > ideal_runtime) {
@@ -1295,9 +1297,13 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
         struct sched_entity *p, *n;
 
         list_for_each_entry_safe(p, n, &cfs_rq->ipi_pending_list, ipi_pending_node) {
+                trace_ipi_list_debug(3, entity_is_task(p) ? task_of(p) : NULL, se->cfs_rq->rq->cpu, p->on_rq, cfs_rq_of(p) == cfs_rq);
                 list_del_init(&p->ipi_pending_node);
-                if (p->on_rq && cfs_rq_of(p) == cfs_rq)
+                if (p->on_rq && cfs_rq_of(p) == cfs_rq && (entity_is_task(p) || p->vruntime - se->vruntime < sysctl_sched_latency)) {
+                        trace_ipi_list_debug(4, entity_is_task(p) ? task_of(p) : NULL, 
+                                        se->cfs_rq->rq->cpu, p->vruntime - cfs_rq->min_vruntime, p->vruntime - se->vruntime);
                         return p;
+                }
         }
 
         list_for_each_entry_safe(p, n, &cfs_rq->interactive_list, interactive_node) {
@@ -1425,8 +1431,9 @@ static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
 #ifdef CONFIG_KVM_VDI
         /* hwandori-experimental */
         //else if (!list_empty(&cfs_rq->ipi_pending_list) && 
-        //                cpu_active(cpu_of(rq)) && hrtimer_is_hres_active(&rq->hrtick_timer)) 
-        //        hrtick_start(rq, 100000LL);    /* FIXME: 100us */
+        else if (se->ipi_pending && 
+                        cpu_active(cpu_of(rq)) && hrtimer_is_hres_active(&rq->hrtick_timer)) 
+                hrtick_start(rq, 100000LL);    /* FIXME: 100us */
 #endif
 }
 
@@ -1986,23 +1993,23 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 	s64 gran, vdiff = curr->vruntime - se->vruntime;
 
 #ifdef CONFIG_KVM_VDI
+        if (curr->ipi_pending)
+                return 0;
         /* this check can be done before vdiff comparison, because this condition is always carried out
          * between sibling vcpus where fairness doesn't have to be met */
-        if (sysctl_interactive_vcpu_preempt_disable) { /* if the woken task (se) is the first entry in its interactive list */
-                if (se->is_vcpu && is_interactive_vcpu(curr))
-                        return 0;
-                //else if (list_first_entry(&se->cfs_rq->interactive_list, struct sched_entity, interactive_node) == se)
-                //        return 1;
+        if (sysctl_interactive_vcpu_preempt_disable) {
+                if (!is_interactive_vcpu(curr) && is_interactive_vcpu(se))
+                        return 1;
         }
 #endif
 	if (vdiff <= 0)
 		return -1;
 #ifdef CONFIG_KVM_VDI
         if (sysctl_sched_interactive_preempt) {
-                if (rq_has_interactive_vcpu(se->my_q))
+                if (!rq_has_interactive_vcpu(curr->my_q) && rq_has_interactive_vcpu(se->my_q))
                         return 1;
-                else if (rq_has_interactive_vcpu(curr->my_q))
-                        return 0;
+                //else if (rq_has_interactive_vcpu(curr->my_q))
+                //        return 0;
         }
 #endif
 

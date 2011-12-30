@@ -5,6 +5,7 @@
 #include <trace/events/kvm.h>
 #include <linux/kvm_task_aware.h>
 #include <linux/timer.h>
+#include <linux/sched.h>
 
 /* FIXME: mb must be required? */
 #define set_guest_thread_state(guest_thread, state_value)     \
@@ -13,7 +14,7 @@
 #define set_vcpu_state(vcpu, state_value)     \
         set_mb(vcpu->state, (state_value))
 
-#define get_bg_vcpu_nice(vcpu)     (vcpu->bg_exec_time * 19 / (vcpu->exec_time + 1))
+#define get_bg_vcpu_nice(vcpu)     (sysctl_kvm_amvp <= 19 ? sysctl_kvm_amvp : vcpu->bg_exec_time * (sysctl_kvm_amvp - 19) / (vcpu->exec_time + 1))
 
 #define KVM_TA_DEBUG
 
@@ -372,7 +373,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now, un
                         /* update gtask flags for background tasks */
                         iter_guest_task->flags = 0;
                         if (kvm->interactive_phase == MIXED_INTERACTIVE_PHASE &&
-                                        iter_guest_task->pre_monitor_load > 10)     /* FIXME: hardcoded 10 */
+                                        iter_guest_task->pre_monitor_load > 10 && iter_guest_task->id != 0x00187)     /* FIXME: hardcoded 10 */
                                 iter_guest_task->flags |= VF_BACKGROUND;
                         
                         if (valid_load_task)
@@ -534,8 +535,7 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
                         vcpu->cur_guest_task->flags);
         set_guest_thread_state(guest_thread, GUEST_THREAD_RUNNING);
 
-        if (vcpu->kvm->interactive_phase == MIXED_INTERACTIVE_PHASE &&
-            (vcpu->flags != vcpu->cur_guest_task->flags || vcpu->bg_nice != bg_nice)) {
+        if (vcpu->flags != vcpu->cur_guest_task->flags || vcpu->bg_nice != bg_nice) {
                 vcpu->flags = vcpu->cur_guest_task->flags;      /* copy gtask flags to vcpu flags */
                 vcpu->bg_nice = bg_nice;
 
@@ -550,8 +550,8 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
                         if (i == vcpu->vcpu_id)
                                 continue;
                         cpumask_clear_cpu(vcpu->vcpu_id, &iter_vcpu->ipi_pending_mask);
+                        trace_kvm_ipi_pending_info(iter_vcpu->vcpu_id, iter_vcpu->ipi_pending_mask.bits[0]);
                 }
-                trace_kvm_ipi_pending_info(vcpu->vcpu_id, vcpu->ipi_pending_mask.bits[0]);
                 if (!cpumask_empty(&vcpu->ipi_pending_mask))
                         vcpu_yield();
         }

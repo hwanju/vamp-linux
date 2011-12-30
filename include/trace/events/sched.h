@@ -564,6 +564,32 @@ TRACE_EVENT(sched_interactive_load,
 	TP_printk("cpu=%d is_this_cpu=%d load=%lld interactive_count=%d",
                 __entry->cpu, __entry->is_this_cpu, __entry->load, __entry->interactive_count)
 );
+TRACE_EVENT(ipi_list_debug,
+        TP_PROTO(int op, struct task_struct *p, int cpu, int cond1, int cond2),
+
+        TP_ARGS(op, p, cpu, cond1, cond2),
+
+        TP_STRUCT__entry(
+                __field( int,   op)
+                __field( int,   tgid)
+                __field( int,   pid)
+                __field( int,   cpu)
+                __field( int,   cond1)
+                __field( int,   cond2)
+        ),
+
+        TP_fast_assign(
+                __entry->op     = op;
+                __entry->tgid   = p ? p->tgid : -1;
+                __entry->pid    = p ? p->pid : -1;
+                __entry->cpu    = cpu;
+                __entry->cond1  = cond1;
+                __entry->cond2  = cond2;
+        ),
+
+        TP_printk("op=%d tgid=%d pid=%d cpu=%d cond1=%d cond2=%d",
+                        __entry->op, __entry->tgid, __entry->pid, __entry->cpu, __entry->cond1, __entry->cond2)
+);
 #endif
 
 #endif /* _TRACE_SCHED_H */
