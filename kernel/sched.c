@@ -2063,6 +2063,7 @@ void set_interactive_phase(struct sched_entity *se, int interactive_phase)
 EXPORT_SYMBOL_GPL(set_interactive_phase);
 
 unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
+EXPORT_SYMBOL_GPL(sysctl_kvm_ipi_first);
 unsigned int __read_mostly sysctl_kvm_ipi_indirect = 0;
 unsigned int __read_mostly sysctl_balsched_vdi_opt = 0;
 unsigned int __read_mostly sysctl_kvm_amvp         = 0;
@@ -2618,7 +2619,11 @@ static inline int try_to_balance_affine(struct task_struct *p)
                                 cpu_set(i, balanced_cpus_allowed);
                                 affinity_updated = 1;
                         }
+                        trace_balsched_cpu_stat(p, i, weighted_cpuload(i), -1, 
+                                        tg->se[i]->my_q->nr_running_vcpus, get_interactive_count(i));
                 }
+                if (se->is_vcpu)
+                        trace_balsched_affinity(p, affinity_updated, balanced_cpus_allowed.bits[0]);
                 /* if no idle cpu exists, return the affinity to all cpus */
                 if (!affinity_updated) {
                         cpus_setall(balanced_cpus_allowed);

@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <trace/events/kvm.h>
 #ifdef CONFIG_KVM_VDI
+#include <linux/sched.h>
 #include <linux/kvm_task_aware.h>
 #endif
 
@@ -93,7 +94,8 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 
 #ifdef CONFIG_KVM_VDI
         /* initialize ipi_pending_mask */
-        if (irq->ipi == 1 && is_sync_ipi(kvm, irq->vector))
+        if (sysctl_kvm_ipi_first && 
+            irq->ipi == 1 && is_sync_ipi(kvm, irq->vector))
                 cpumask_clear(&src->vcpu->ipi_pending_mask);
 #endif
 	kvm_for_each_vcpu(i, vcpu, kvm) {
@@ -109,7 +111,8 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 				r = 0;
 			r += kvm_apic_set_irq(vcpu, irq);
 #ifdef CONFIG_KVM_VDI
-                        if (irq->ipi == 1 && i != src->vcpu->vcpu_id && is_sync_ipi(kvm, irq->vector)) {
+                        if (sysctl_kvm_ipi_first && 
+                            irq->ipi == 1 && i != src->vcpu->vcpu_id && is_sync_ipi(kvm, irq->vector)) {
                                 struct task_struct *task = NULL;
                                 struct pid *pid;
                                 int pending;
@@ -138,7 +141,8 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 		r = kvm_apic_set_irq(lowest, irq);
 
 #ifdef CONFIG_KVM_VDI
-        if (irq->ipi == 1 && is_sync_ipi(kvm, irq->vector) &&
+        if (sysctl_kvm_ipi_first && 
+            irq->ipi == 1 && is_sync_ipi(kvm, irq->vector) &&
             !cpumask_empty(&src->vcpu->ipi_pending_mask)) {
                 trace_kvm_ipi_pending_info(src->vcpu->vcpu_id, src->vcpu->ipi_pending_mask.bits[0]);
                 vcpu_yield();
