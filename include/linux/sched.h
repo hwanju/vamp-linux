@@ -1204,9 +1204,8 @@ struct sched_entity {
 #define NEW_VCPU_SE     2
         int is_vcpu;
         unsigned int vcpu_flags;
-        struct list_head ipi_pending_node;
-        struct list_head interactive_node;
-        int ipi_pending;
+        struct list_head urgent_vcpu_node;
+        int urgent_vcpu;
 #endif
 };
 
@@ -2015,16 +2014,14 @@ static inline unsigned int get_sysctl_timer_migration(void)
 }
 #endif
 #ifdef CONFIG_KVM_VDI
-/* ipi pending type */
-#define KVM_IPI_DIRECT          1
-#define KVM_IPI_INDIRECT        2
 /* parameters */
 extern unsigned int sysctl_kvm_ipi_first;
-extern unsigned int sysctl_kvm_ipi_indirect;
+extern unsigned int sysctl_kvm_ipi_grp_first;
+extern unsigned int sysctl_kvm_ipi_tslice_ns;
 extern unsigned int sysctl_kvm_inter_vm_preempt;
 extern unsigned int sysctl_kvm_intra_vm_preempt;
-extern unsigned int sysctl_balsched_vdi_opt;
 extern unsigned int sysctl_kvm_amvp;
+extern unsigned int sysctl_kvm_amvp_sched;
 #endif
 extern unsigned int sysctl_sched_rt_period;
 extern int sysctl_sched_rt_runtime;
@@ -2731,7 +2728,7 @@ static inline unsigned long rlimit_max(unsigned int limit)
 #define NON_MIXED_INTERACTIVE_PHASE     1
 #define MIXED_INTERACTIVE_PHASE         2
 extern void set_interactive_phase(struct sched_entity *se, int interactive_phase);
-extern int list_add_ipi_pending(struct task_struct *p);
+extern int list_add_urgent_vcpu(struct task_struct *p);
 
 /* VCPU flags */
 #define VF_SHIFT                16

@@ -395,7 +395,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now, un
                         /* update gtask flags for background tasks */
                         iter_guest_task->flags = 0;
                         if (kvm->interactive_phase == MIXED_INTERACTIVE_PHASE &&
-                                        iter_guest_task->pre_monitor_load > 10 &&     /* FIXME: hardcoded 10 */ 
+                                        iter_guest_task->pre_monitor_load > bg_load_thresh_pct &&     /* FIXME: another parameter? */ 
                                         !is_system_task(kvm, iter_guest_task))
                                 iter_guest_task->flags |= VF_BACKGROUND;
                         
@@ -572,10 +572,10 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
                 kvm_for_each_vcpu(i, iter_vcpu, vcpu->kvm) {
                         if (i == vcpu->vcpu_id)
                                 continue;
-                        cpumask_clear_cpu(vcpu->vcpu_id, &iter_vcpu->ipi_pending_mask);
-                        trace_kvm_ipi_pending_info(iter_vcpu->vcpu_id, iter_vcpu->ipi_pending_mask.bits[0]);
+                        cpumask_clear_cpu(vcpu->vcpu_id, &iter_vcpu->urgent_vcpu_mask);
+                        trace_kvm_urgent_vcpu_info(iter_vcpu->vcpu_id, iter_vcpu->urgent_vcpu_mask.bits[0]);
                 }
-                if (!cpumask_empty(&vcpu->ipi_pending_mask))
+                if (!cpumask_empty(&vcpu->urgent_vcpu_mask))
                         vcpu_yield();
         }
 }
@@ -719,15 +719,14 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int du
         if (!load_monitor_enabled)
                 return;
         
-        if (!timer_pending(&kvm->load_timer)) {       // original code
-        //if (!timer_pending(&kvm->load_timer) || kvm->monitor_seqnum >= 3) {  /* FIXME: hardcoded 3 (>= 360ms) */
+        if (!timer_pending(&kvm->load_timer) || kvm->monitor_seqnum >= 3) {  /* FIXME: hardcoded 3 (>= 360ms) */
                 int vidx;
                 struct kvm_vcpu *vcpu;
                 unsigned long long pre_monitor_duration = (LOAD_EPOCH_TIME_IN_NSEC * (NR_LOAD_ENTRIES - 1)) + load_epoch_offset(now);
 
-                //del_timer_sync(&kvm->load_timer);
-                //if (kvm->interactive_phase)
-                //        trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
+                del_timer_sync(&kvm->load_timer);
+                if (kvm->interactive_phase)
+                        trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
 
                 kvm_for_each_vcpu(vidx, vcpu, kvm) {
                         /* if last_arrival > t -> pre_monitor_run_delay = run_delay - prev_run_delay,

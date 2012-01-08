@@ -93,10 +93,10 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 		printk(KERN_INFO "kvm: apic: phys broadcast and lowest prio\n");
 
 #ifdef CONFIG_KVM_VDI
-        /* initialize ipi_pending_mask */
+        /* initialize urgent_vcpu_mask */
         if (sysctl_kvm_ipi_first && 
             irq->ipi == 1 && is_sync_ipi(kvm, irq->vector))
-                cpumask_clear(&src->vcpu->ipi_pending_mask);
+                cpumask_clear(&src->vcpu->urgent_vcpu_mask);
 #endif
 	kvm_for_each_vcpu(i, vcpu, kvm) {
 		if (!kvm_apic_present(vcpu))
@@ -122,10 +122,10 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
                                         task = get_pid_task(vcpu->pid, PIDTYPE_PID);
                                 rcu_read_unlock();
                                 if (task) {
-                                        pending = list_add_ipi_pending(task);
+                                        pending = list_add_urgent_vcpu(task);
                                         put_task_struct(task);
                                         if (pending)
-                                                cpumask_set_cpu(i, &src->vcpu->ipi_pending_mask);
+                                                cpumask_set_cpu(i, &src->vcpu->urgent_vcpu_mask);
                                 }
                         }
 #endif
@@ -143,8 +143,8 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 #ifdef CONFIG_KVM_VDI
         if (sysctl_kvm_ipi_first && 
             irq->ipi == 1 && is_sync_ipi(kvm, irq->vector) &&
-            !cpumask_empty(&src->vcpu->ipi_pending_mask)) {
-                trace_kvm_ipi_pending_info(src->vcpu->vcpu_id, src->vcpu->ipi_pending_mask.bits[0]);
+            !cpumask_empty(&src->vcpu->urgent_vcpu_mask)) {
+                trace_kvm_urgent_vcpu_info(src->vcpu->vcpu_id, src->vcpu->urgent_vcpu_mask.bits[0]);
                 vcpu_yield();
         }
 #endif

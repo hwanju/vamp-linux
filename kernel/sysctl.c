@@ -365,13 +365,20 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 	{
-		.procname	= "kvm_ipi_indirect",
-		.data		= &sysctl_kvm_ipi_indirect,
+		.procname	= "kvm_ipi_grp_first",
+		.data		= &sysctl_kvm_ipi_grp_first,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
 		.extra2		= &one,
+	},
+	{
+		.procname	= "kvm_ipi_tslice_ns",
+		.data		= &sysctl_kvm_ipi_tslice_ns,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
 	},
 	{
 		.procname	= "kvm_inter_vm_preempt",
@@ -392,8 +399,8 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 	{
-		.procname	= "balsched_vdi_opt",
-		.data		= &sysctl_balsched_vdi_opt,
+		.procname	= "kvm_amvp_sched",
+		.data		= &sysctl_kvm_amvp_sched,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,

@@ -534,9 +534,9 @@ TRACE_EVENT(sched_ipi_futex,
 
 	TP_fast_assign(
 		__entry->source_pid             = source_task->pid;
-                __entry->source_type            = source_task->se.ipi_pending;
+                __entry->source_type            = source_task->se.urgent_vcpu;
 		__entry->target_pid             = target_task->pid;
-                __entry->target_type            = target_task->se.ipi_pending;
+                __entry->target_type            = target_task->se.urgent_vcpu;
 	),
 
 	TP_printk("source_pid=%d (type=%d) -> target_pid=%d (type=%d)",

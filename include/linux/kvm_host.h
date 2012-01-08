@@ -183,7 +183,7 @@ struct kvm_vcpu {
         unsigned int reactive_gthread_load;             /* accumulated load of increased guest threads */
         
         /* ipi-aware */
-        cpumask_t ipi_pending_mask;
+        cpumask_t urgent_vcpu_mask;
 #endif
 
 	struct kvm_vcpu_arch arch;

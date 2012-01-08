@@ -563,22 +563,22 @@ TRACE_EVENT(kvm_bg_vcpu,
                 __entry->bg_exec_time, __entry->exec_time, __entry->bg_vcpu_nice)
 );
 
-TRACE_EVENT(kvm_ipi_pending_info,
-        TP_PROTO(int vcpu_id, unsigned long ipi_pending_mask),
+TRACE_EVENT(kvm_urgent_vcpu_info,
+        TP_PROTO(int vcpu_id, unsigned long urgent_vcpu_mask),
         
-        TP_ARGS(vcpu_id, ipi_pending_mask),
+        TP_ARGS(vcpu_id, urgent_vcpu_mask),
         
         TP_STRUCT__entry(
                 __field( int,           vcpu_id         )
-                __field( unsigned long, ipi_pending_mask)
+                __field( unsigned long, urgent_vcpu_mask)
         ),
         
         TP_fast_assign(
                 __entry->vcpu_id                = vcpu_id;
-                __entry->ipi_pending_mask       = ipi_pending_mask;
+                __entry->urgent_vcpu_mask       = urgent_vcpu_mask;
         ),
         
-        TP_printk("vcpu_id=%d ipi_pending_mask=%lx", __entry->vcpu_id, __entry->ipi_pending_mask)
+        TP_printk("vcpu_id=%d urgent_vcpu_mask=%lx", __entry->vcpu_id, __entry->urgent_vcpu_mask)
 );
 
 TRACE_EVENT(kvm_system_task,

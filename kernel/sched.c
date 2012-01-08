@@ -346,7 +346,7 @@ struct cfs_rq {
 	struct list_head tasks;
 	struct list_head *balance_iterator;
 #ifdef CONFIG_KVM_VDI
-	struct list_head ipi_pending_list;
+	struct list_head urgent_vcpu_list;
         unsigned long nr_running_bg_vcpus; 
 #endif
 
@@ -2064,37 +2064,50 @@ EXPORT_SYMBOL_GPL(set_interactive_phase);
 
 unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
 EXPORT_SYMBOL_GPL(sysctl_kvm_ipi_first);
-unsigned int __read_mostly sysctl_kvm_ipi_indirect = 0;
-unsigned int __read_mostly sysctl_balsched_vdi_opt = 0;
+unsigned int __read_mostly sysctl_kvm_ipi_grp_first= 0;
 unsigned int __read_mostly sysctl_kvm_amvp         = 0;
 EXPORT_SYMBOL_GPL(sysctl_kvm_amvp);
+unsigned int __read_mostly sysctl_kvm_amvp_sched   = 0;
 
-#include <linux/futex.h>
-int __list_add_ipi_pending(struct task_struct *p, struct sched_entity *se, int type, int force_enqueue)
+int __list_add_urgent_vcpu(struct task_struct *p, struct sched_entity *se, int force_enqueue)
 {
         struct cfs_rq *cfs_rq = se->cfs_rq;
         int need_resched = 0;
-
-        if (!force_enqueue && cfs_rq->curr == se)       /* assert se is task */
-                return 0;       /* delivered promptly (not pending) */
+        int pending = 1;
 
         for (; se; se = se->parent) {
-                se->ipi_pending = type;
                 cfs_rq = se->cfs_rq;
-                trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, cfs_rq->curr != se);
-                if (!force_enqueue && (!se->on_rq || cfs_rq->curr == se))
+
+                if (!sysctl_kvm_ipi_grp_first && se->my_q)
+                        break;
+
+                /* urgent_vcpu flag indicates ipi is pending or is being processed 
+                 * Two purposes: 1) when enqueued, also enqueued into urgent_vcpu_list 
+                 *               2) protect from being preempted during ipi processing, 
+                 *                  but preemption by tick is allowed
+                 */
+                se->urgent_vcpu = 1;
+
+                if (!force_enqueue && cfs_rq->curr == se) {
+                        if (!se->my_q)          /* if entity is task, */
+                                pending = 0;    /* delivered promptly */
                         continue;
-                trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, list_empty(&se->ipi_pending_node));
-                if (list_empty(&se->ipi_pending_node)) {
-                        list_add_tail(&se->ipi_pending_node, &cfs_rq->ipi_pending_list);
+                }
+                trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, cfs_rq->curr != se);
+                if (!force_enqueue && !se->on_rq)
+                        continue;
+                trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, list_empty(&se->urgent_vcpu_node));
+                if (list_empty(&se->urgent_vcpu_node)) {
+                        list_add_tail(&se->urgent_vcpu_node, &cfs_rq->urgent_vcpu_list);
                         need_resched = 1;
                 }
         }
-        if (need_resched && !cfs_rq->rq->curr->se.ipi_pending)
+        if (need_resched && !cfs_rq->rq->curr->se.urgent_vcpu)
                 resched_task(cfs_rq->rq->curr);
-        return 1;
+
+        return pending;
 }
-int list_add_ipi_pending(struct task_struct *p)
+int list_add_urgent_vcpu(struct task_struct *p)
 {
         struct rq *rq;
         unsigned long flags;
@@ -2104,31 +2117,18 @@ int list_add_ipi_pending(struct task_struct *p)
                 return 0;
 
         rq = task_rq_lock(p, &flags);
-        pending = __list_add_ipi_pending(p, &p->se, KVM_IPI_DIRECT, 0);
+        pending = __list_add_urgent_vcpu(p, &p->se, 0);
         task_rq_unlock(rq, p, &flags); 
 
-        /* below will be deprecated */
-        if (sysctl_kvm_ipi_indirect && !p->se.on_rq)  {     /* not on rq */
-                struct task_struct *owner = get_futex_owner(p);
-
-                if (!owner)
-                        return 0;
-
-                rq = task_rq_lock(owner, &flags);
-                __list_add_ipi_pending(p, &owner->se, KVM_IPI_INDIRECT, 0);   /* only start point of assigning KVM_IPI_INDIRECT */
-                task_rq_unlock(rq, owner, &flags); 
-
-                trace_sched_ipi_futex(p, owner);
-        }
         return pending;
 }
-EXPORT_SYMBOL_GPL(list_add_ipi_pending);
+EXPORT_SYMBOL_GPL(list_add_urgent_vcpu);
 
 void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
 {
         p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
 
-        if (sysctl_kvm_amvp && !p->se.ipi_pending) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
+        if (sysctl_kvm_amvp && !p->se.urgent_vcpu) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
                 if (new_flags & VF_BACKGROUND)
                         set_user_nice(p, bg_nice);
                 else
@@ -2589,7 +2589,7 @@ static inline int try_to_balance_affine(struct task_struct *p)
         int affinity_updated = 0;
         unsigned long cur_total_weight = 0;
 
-        if (tg->balsched_state == BALSCHED_STATE_DISABLED)
+        if (tg->balsched_state == BALSCHED_STATE_DISABLED && !sysctl_kvm_amvp_sched)
                 return selected_cpu;
 
         cpus_clear(balanced_cpus_allowed);
@@ -2647,20 +2647,6 @@ static inline int try_to_balance_affine(struct task_struct *p)
                                 }
                         }
                 }
-                else if (sysctl_balsched_vdi_opt && sysctl_kvm_amvp && 
-                         tg->interactive_phase == MIXED_INTERACTIVE_PHASE) {
-                        for_each_cpu(i, cpu_active_mask) {
-                                if (likely(tg->se[i] && tg->se[i]->my_q) && 
-                                    ((is_interactive_vcpu(se) && !tg->se[i]->my_q->nr_running_bg_vcpus) ||
-                                    (!is_interactive_vcpu(se) && tg->se[i]->my_q->nr_running_bg_vcpus)) &&
-                                    !(load_imbalance = cause_load_imbalance(tg, i, se->load.weight, cur_total_weight))) {
-                                        cpu_set(i, balanced_cpus_allowed);
-                                        affinity_updated = 1;
-                                }
-                                trace_balsched_cpu_stat(p, i, weighted_cpuload(i), load_imbalance, 
-                                                tg->se[i]->my_q->nr_running_bg_vcpus, get_interactive_count(i));
-                        }
-                }
                 if (se->is_vcpu)
                         trace_balsched_affinity(p, affinity_updated, balanced_cpus_allowed.bits[0]);
 
@@ -2668,6 +2654,18 @@ static inline int try_to_balance_affine(struct task_struct *p)
                 if (!affinity_updated) {
                         cpus_setall(balanced_cpus_allowed);
                         affinity_updated = 1;
+                }
+        }
+        if (sysctl_kvm_amvp_sched && sysctl_kvm_amvp && 
+                 tg->interactive_phase && is_interactive_vcpu(se)) {
+                for_each_cpu(i, cpu_active_mask) {
+                        if (likely(tg->se[i] && tg->se[i]->my_q)) {
+                                if (tg->se[i]->cfs_rq->curr == tg->se[i] ||
+                                    (!tg->se[i]->on_rq && tg->se[i]->vruntime < tg->se[i]->cfs_rq->min_vruntime)) {
+                                        selected_cpu = i;
+                                        break;
+                                }
+                        }
                 }
         }
         /* if found, update affinity */
@@ -3091,7 +3089,7 @@ static void __sched_fork(struct task_struct *p)
 	p->se.vruntime			= 0;
 	INIT_LIST_HEAD(&p->se.group_node);
 #ifdef CONFIG_KVM_VDI
-	INIT_LIST_HEAD(&p->se.ipi_pending_node);
+	INIT_LIST_HEAD(&p->se.urgent_vcpu_node);
 #endif
 
 #ifdef CONFIG_SCHEDSTATS
@@ -8194,7 +8192,7 @@ static void init_cfs_rq(struct cfs_rq *cfs_rq, struct rq *rq)
 	cfs_rq->tasks_timeline = RB_ROOT;
 	INIT_LIST_HEAD(&cfs_rq->tasks);
 #ifdef CONFIG_KVM_VDI
-	INIT_LIST_HEAD(&cfs_rq->ipi_pending_list);
+	INIT_LIST_HEAD(&cfs_rq->urgent_vcpu_list);
 #endif
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	cfs_rq->rq = rq;
@@ -8269,7 +8267,7 @@ static void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
 	update_load_set(&se->load, 0);
 	se->parent = parent;
 #ifdef CONFIG_KVM_VDI
-	INIT_LIST_HEAD(&se->ipi_pending_node);
+	INIT_LIST_HEAD(&se->urgent_vcpu_node);
 #endif
 }
 #endif

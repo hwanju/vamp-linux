@@ -821,21 +821,6 @@ static void wake_futex(struct futex_q *q)
 	put_task_struct(p);
 }
 
-#ifdef CONFIG_KVM_VDI
-/* hwandori-experimental */
-//#include <trace/events/sched.h>
-struct task_struct *get_futex_owner(struct task_struct *p)
-{
-        struct futex_pi_state *pi_state;
-
-        if (!p->pi_blocked_on || !p->pi_blocked_on->lock)
-                return NULL;
-        pi_state = container_of(p->pi_blocked_on->lock, struct futex_pi_state, pi_mutex);
-
-        return pi_state->owner;
-}
-#endif
-
 static int wake_futex_pi(u32 __user *uaddr, u32 uval, struct futex_q *this)
 {
 	struct task_struct *new_owner;
@@ -895,19 +880,6 @@ static int wake_futex_pi(u32 __user *uaddr, u32 uval, struct futex_q *this)
 	raw_spin_unlock_irq(&new_owner->pi_lock);
 
 	raw_spin_unlock(&pi_state->pi_mutex.wait_lock);
-#ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
-        /*
-         * Before waking new owner up, check if the current ipi_pending type is
-         * KVM_IPI_INDIRECT, which means the current is depended on a vcpu that
-         * has a pending IPI. If so and the new owner is a normal thread (w/o any
-         * pending IPI), inherit the KVM_IPI_INDIRECT type to the new owner.
-         */
-        if (current->se.ipi_pending == KVM_IPI_INDIRECT &&
-            new_owner->se.ipi_pending == 0)
-                new_owner->se.ipi_pending = KVM_IPI_INDIRECT;
-        //trace_sched_ipi_futex(current, new_owner);
-#endif
 	rt_mutex_unlock(&pi_state->pi_mutex);
 
 	return 0;
