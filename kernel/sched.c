@@ -2124,6 +2124,13 @@ int list_add_urgent_vcpu(struct task_struct *p)
 }
 EXPORT_SYMBOL_GPL(list_add_urgent_vcpu);
 
+void set_resched_vcpu(struct task_struct *p)
+{
+        BUG_ON(p->se.my_q);     /* assert entity is leaf node (vcpu) */
+        p->se.resched_vcpu = 1;
+}
+EXPORT_SYMBOL_GPL(set_resched_vcpu);
+
 void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
 {
         p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;

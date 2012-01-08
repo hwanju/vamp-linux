@@ -1332,6 +1332,7 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
         if (entity_is_task(prev) || 
             list_empty(&group_cfs_rq(prev)->urgent_vcpu_list))
                 prev->urgent_vcpu = 0;
+        prev->resched_vcpu = 0;
 #endif
 	if (prev->on_rq) {
 		update_stats_wait_start(cfs_rq, prev);
@@ -1971,6 +1972,8 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 
 #ifdef CONFIG_KVM_VDI
         if (curr->urgent_vcpu)
+                return 0;
+        if (se->resched_vcpu)
                 return 0;
         /* this check can be done before vdiff comparison, because this condition is always carried out
          * between sibling vcpus where fairness doesn't have to be met */

@@ -107,12 +107,9 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			continue;
 
 		if (!kvm_is_dm_lowest_prio(irq)) {
-			if (r < 0)
-				r = 0;
-			r += kvm_apic_set_irq(vcpu, irq);
 #ifdef CONFIG_KVM_VDI
-                        if (sysctl_kvm_ipi_first && 
-                            irq->ipi == 1 && i != src->vcpu->vcpu_id && is_sync_ipi(kvm, irq->vector)) {
+                        if (sysctl_kvm_ipi_first && irq->ipi == 1 && i != src->vcpu->vcpu_id && 
+                            (is_sync_ipi(kvm, irq->vector) || is_resched_ipi(kvm, irq->vector))) {
                                 struct task_struct *task = NULL;
                                 struct pid *pid;
                                 int pending;
@@ -122,13 +119,20 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
                                         task = get_pid_task(vcpu->pid, PIDTYPE_PID);
                                 rcu_read_unlock();
                                 if (task) {
-                                        pending = list_add_urgent_vcpu(task);
+                                        if (is_sync_ipi(kvm, irq->vector)) {
+                                                pending = list_add_urgent_vcpu(task);
+                                                if (pending)
+                                                        cpumask_set_cpu(i, &src->vcpu->urgent_vcpu_mask);
+                                        }
+                                        else if (is_resched_ipi(kvm, irq->vector))
+                                                set_resched_vcpu(task);
                                         put_task_struct(task);
-                                        if (pending)
-                                                cpumask_set_cpu(i, &src->vcpu->urgent_vcpu_mask);
                                 }
                         }
 #endif
+			if (r < 0)
+				r = 0;
+			r += kvm_apic_set_irq(vcpu, irq);
 		} else if (kvm_lapic_enabled(vcpu)) {
 			if (!lowest)
 				lowest = vcpu;

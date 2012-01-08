@@ -32,10 +32,11 @@ extern unsigned int load_period_shift;
 #define VCPU_RUNNING    2
 
 /* OS-aware */
-#define has_system_task(kvm)            (kvm->system_task_id > 0)    
+#define has_system_task(kvm)            (kvm->system_task_id != 0 && kvm->system_task_id != -1)    
 #define is_windows_os(kvm)              has_system_task(kvm)
-#define is_unix_os(kvm)                 (!is_windows_os(kvm))
+#define is_unix_os(kvm)                 (!is_windows_os(kvm))   /* FIXME: currently assuming Linux */
 #define is_sync_ipi(kvm, vector)        (is_windows_os(kvm) && vector == 0xe1)
+#define is_resched_ipi(kvm, vector)     (is_unix_os(kvm) && vector == 0xfd)
 
 struct guest_thread_info {
         volatile long state;            /* 0 = not running, 2 = running */

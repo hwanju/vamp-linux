@@ -1206,6 +1206,7 @@ struct sched_entity {
         unsigned int vcpu_flags;
         struct list_head urgent_vcpu_node;
         int urgent_vcpu;
+        int resched_vcpu;
 #endif
 };
 
@@ -2729,6 +2730,7 @@ static inline unsigned long rlimit_max(unsigned int limit)
 #define MIXED_INTERACTIVE_PHASE         2
 extern void set_interactive_phase(struct sched_entity *se, int interactive_phase);
 extern int list_add_urgent_vcpu(struct task_struct *p);
+extern void set_resched_vcpu(struct task_struct *p);
 
 /* VCPU flags */
 #define VF_SHIFT                16
