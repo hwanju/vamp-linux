@@ -49,6 +49,7 @@ struct guest_thread_info {
         unsigned long long last_arrival;
         unsigned long long load_epoch_id;       
         unsigned long long cpu_loads[NR_LOAD_ENTRIES];
+        unsigned long long cur_load_avg;
 };
 
 struct guest_task_struct {

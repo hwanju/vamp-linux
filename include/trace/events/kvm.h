@@ -490,8 +490,8 @@ TRACE_EVENT(kvm_gthread_load,
 );
 
 TRACE_EVENT(kvm_load_info,
-	TP_PROTO(struct kvm *kvm, unsigned int cur_vm_load, unsigned int reactive_gtask_load),
-	TP_ARGS(kvm, cur_vm_load, reactive_gtask_load),
+	TP_PROTO(struct kvm *kvm, unsigned int vm_load, unsigned int eff_vm_load, unsigned int reactive_gtask_load),
+	TP_ARGS(kvm, vm_load, eff_vm_load, reactive_gtask_load),
 
 	TP_STRUCT__entry(
 		__field(	int,            vm_id                   )
@@ -499,7 +499,8 @@ TRACE_EVENT(kvm_load_info,
 		__field(	int,            last_interactive_seqnum )
 		__field(	int,            interactive_phase       )
 		__field(	unsigned int,   pre_monitor_load        )
-		__field(	unsigned int,	cur_vm_load             )
+		__field(	unsigned int,	vm_load                 )
+		__field(	unsigned int,	eff_vm_load             )
 		__field(	unsigned int,	reactive_gtask_load     )
 	),
 
@@ -509,13 +510,14 @@ TRACE_EVENT(kvm_load_info,
                 __entry->last_interactive_seqnum= kvm->last_interactive_seqnum;
                 __entry->interactive_phase      = kvm->interactive_phase;
                 __entry->pre_monitor_load       = kvm->pre_monitor_load;
-                __entry->cur_vm_load            = cur_vm_load;
+                __entry->vm_load                = vm_load;
+                __entry->eff_vm_load            = eff_vm_load;
                 __entry->reactive_gtask_load    = reactive_gtask_load;
 	),
 
-	TP_printk("vm%d sn=%d lastsn=%d interactive_phase=%d pre_monitor_load=%u cur_vm_load=%u reactive_gtask_load=%u",
+	TP_printk("vm%d sn=%d lastsn=%d interactive_phase=%d pre_monitor_load=%u vm_load=%u eff_vm_load=%u reactive_gtask_load=%u",
                         __entry->vm_id, __entry->monitor_seqnum, __entry->last_interactive_seqnum, __entry->interactive_phase,
-                        __entry->pre_monitor_load, __entry->cur_vm_load, __entry->reactive_gtask_load)
+                        __entry->pre_monitor_load, __entry->vm_load, __entry->eff_vm_load, __entry->reactive_gtask_load)
 );
 
 TRACE_EVENT(kvm_gtask_stat,
