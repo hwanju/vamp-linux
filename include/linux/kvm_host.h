@@ -323,8 +323,7 @@ struct kvm {
         spinlock_t guest_task_lock;
         struct timer_list load_timer;
         u64 monitor_timestamp;
-        int monitor_seqnum, last_interactive_seqnum;
-        unsigned int monitor_interval_in_msec;
+        u64 user_input_timestamp;
 
         unsigned int pre_monitor_load;          /* aggregate vcpu load during pre-monitoring period */
         int interactive_phase;                  /* 0: normal phase, NON_MIXED_INTERACTIVE_PHASE: fast path, 

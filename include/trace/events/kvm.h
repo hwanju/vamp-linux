@@ -495,8 +495,6 @@ TRACE_EVENT(kvm_load_info,
 
 	TP_STRUCT__entry(
 		__field(	int,            vm_id                   )
-		__field(	int,            monitor_seqnum          )
-		__field(	int,            last_interactive_seqnum )
 		__field(	int,            interactive_phase       )
 		__field(	unsigned int,   pre_monitor_load        )
 		__field(	unsigned int,	vm_load                 )
@@ -506,8 +504,6 @@ TRACE_EVENT(kvm_load_info,
 
 	TP_fast_assign(
                 __entry->vm_id                  = kvm->vm_id;
-                __entry->monitor_seqnum         = kvm->monitor_seqnum;
-                __entry->last_interactive_seqnum= kvm->last_interactive_seqnum;
                 __entry->interactive_phase      = kvm->interactive_phase;
                 __entry->pre_monitor_load       = kvm->pre_monitor_load;
                 __entry->vm_load                = vm_load;
@@ -515,8 +511,8 @@ TRACE_EVENT(kvm_load_info,
                 __entry->reactive_gtask_load    = reactive_gtask_load;
 	),
 
-	TP_printk("vm%d sn=%d lastsn=%d interactive_phase=%d pre_monitor_load=%u vm_load=%u eff_vm_load=%u reactive_gtask_load=%u",
-                        __entry->vm_id, __entry->monitor_seqnum, __entry->last_interactive_seqnum, __entry->interactive_phase,
+	TP_printk("vm%d interactive_phase=%d pre_monitor_load=%u vm_load=%u eff_vm_load=%u reactive_gtask_load=%u",
+                        __entry->vm_id, __entry->interactive_phase,
                         __entry->pre_monitor_load, __entry->vm_load, __entry->eff_vm_load, __entry->reactive_gtask_load)
 );
 

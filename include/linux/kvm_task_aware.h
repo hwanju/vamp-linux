@@ -62,7 +62,7 @@ struct guest_task_struct {
 
 void init_kvm_load_monitor(struct kvm *kvm);
 void exit_kvm_load_monitor(struct kvm *kvm);
-void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int duration_in_msec);
+void start_load_monitor(struct kvm *kvm, unsigned long long now);
 void init_task_aware_vcpu(struct kvm_vcpu *vcpu);
 void destroy_task_aware_vcpu(struct kvm_vcpu *vcpu);
 int init_task_aware_agent(void);

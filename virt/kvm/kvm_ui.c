@@ -4,10 +4,6 @@
 #include <linux/kvm_task_aware.h>
 #include <linux/kvm_ui.h>
 
-#define DEFAULT_UI_MONITOR_MSEC         120
-static unsigned int ui_monitor_msec = DEFAULT_UI_MONITOR_MSEC;
-module_param(ui_monitor_msec, uint, 0644);
-
 #define get_event_type(arg)     (arg & 0xff)
 #define get_event_info(arg)     ((arg >> 8) & 0xff)
 
@@ -27,7 +23,7 @@ int kvm_ui_event(struct kvm *kvm, uint32_t arg)
         /* when an ui event is released, set the current timestamp into kvm */
         if ((event_type == kvm_kbd_pressed && likely_load_gen_keys(event_info)) || 
             event_type == kvm_mouse_released)
-                start_load_monitor(kvm, now, ui_monitor_msec);
+                start_load_monitor(kvm, now);
 
         trace_kvm_ui(kvm, event_type, event_info, load_idx_by_time(now));
 

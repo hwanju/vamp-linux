@@ -329,22 +329,24 @@ static inline unsigned int get_potential_gthread_load(struct kvm_vcpu *vcpu,
                         ((now - vcpu->kvm->monitor_timestamp) * (vcpu->cur_load_avg + 1));
 }
 
-/* FIXME: following two parameters depend on # of vcpus, because loads are aggregated across vcpus */ 
-#define DEFAULT_LOAD_DELTA_PCT          40
-static int load_delta_thresh_pct = DEFAULT_LOAD_DELTA_PCT;
-module_param(load_delta_thresh_pct, int, 0644);
-
 #define DEFAULT_BG_LOAD_THRESH_PCT      60
 static unsigned int bg_load_thresh_pct = DEFAULT_BG_LOAD_THRESH_PCT;
 module_param(bg_load_thresh_pct, uint, 0644);
 
-#define DEFAULT_MAX_UI_MONITOR_PERIOD  40      /* FIXME: this value depends on ui period */
-static unsigned int max_ui_monitor_period = DEFAULT_MAX_UI_MONITOR_PERIOD;
-module_param(max_ui_monitor_period, uint, 0644);
+#define DEFAULT_MAX_INTERACTIVE_PHASE_MSEC      5000
+static unsigned int max_interactive_phase_msec = DEFAULT_MAX_INTERACTIVE_PHASE_MSEC;
+module_param(max_interactive_phase_msec, uint, 0644);
 
 #define DEFAULT_AMVP_MONITOR_WINDOW     30000000UL      /* 30ms */
 static unsigned long amvp_monitor_window = DEFAULT_AMVP_MONITOR_WINDOW;
 module_param(amvp_monitor_window, ulong, 0644);
+
+static int load_prof_enabled = 0;
+module_param(load_prof_enabled, int, 0644);
+
+#define DEFAULT_LOAD_PROF_PERIOD_MSEC   120
+static unsigned int load_prof_period_msec = DEFAULT_LOAD_PROF_PERIOD_MSEC;
+module_param(load_prof_period_msec, uint, 0644);
 
 /* 
  * calculate cpu loads during pre-monitoring period, that is prior to a user event
@@ -418,7 +420,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now, un
                         /* update gtask flags for background tasks */
                         iter_guest_task->flags = 0;
                         if (kvm->interactive_phase == MIXED_INTERACTIVE_PHASE &&
-                                        iter_guest_task->pre_monitor_load > bg_load_thresh_pct &&     /* FIXME: another parameter? */ 
+                                        iter_guest_task->pre_monitor_load > bg_load_thresh_pct &&
                                         !is_system_task(kvm, iter_guest_task))
                                 iter_guest_task->flags |= VF_BACKGROUND;
                         
@@ -442,8 +444,20 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now, un
         trace_kvm_load_info(kvm, vm_load, kvm->pre_monitor_load, 0);
 }
 
-#define in_interactive_phase(kvm)       \
-        (kvm->monitor_seqnum < max_ui_monitor_period && kvm->monitor_seqnum - kvm->last_interactive_seqnum < 6) // FIXME: 6 is hardcoded
+static void clear_gtask_flags(struct kvm *kvm)
+{
+        int bidx;
+        spin_lock(&kvm->guest_task_lock);
+        for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
+                struct guest_task_struct *iter_guest_task;
+                struct hlist_node *node;
+                hlist_for_each_entry(iter_guest_task, node, &kvm->guest_task_hash[bidx], link)
+                        iter_guest_task->flags = 0;
+        }
+        spin_unlock(&kvm->guest_task_lock);
+}
+
+#define in_interactive_phase(kvm, now)       (now - kvm->user_input_timestamp < (max_interactive_phase_msec * NSEC_PER_MSEC))
 static void load_timer_handler(unsigned long data)
 {
         struct kvm *kvm = (struct kvm *)data;
@@ -458,7 +472,13 @@ static void load_timer_handler(unsigned long data)
         unsigned int eff_vm_load;
         unsigned int reactive_gtask_load;
 
+        struct task_struct *task = NULL;
+        struct pid *pid;
+
         BUG_ON(!kvm);
+
+        if (!load_prof_enabled)
+                goto finish_interactive_phase;
 
         trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, load_period_msec, kvm->monitor_timestamp, now);
 
@@ -480,9 +500,6 @@ static void load_timer_handler(unsigned long data)
 
                 trace_kvm_vcpu_stat(kvm->vm_id, vcpu->vcpu_id, vcpu->cur_run_delay, vcpu->flags);
         }
-        if (kvm->interactive_phase == NON_MIXED_INTERACTIVE_PHASE &&    /* fast path */
-            (int)eff_vm_load - (int)kvm->pre_monitor_load > load_delta_thresh_pct)
-                kvm->last_interactive_seqnum = kvm->monitor_seqnum;     /* extend interactive phase */
 
         /* scan gtask loads for monitoring period 
          * Note that this scanning is required for only slow path, but scanning always for analysis */
@@ -521,38 +538,30 @@ static void load_timer_handler(unsigned long data)
                 }
         }
         spin_unlock(&kvm->guest_task_lock);
-
-        if (kvm->interactive_phase == MIXED_INTERACTIVE_PHASE) {        /* slow path */
-                if (reactive_gtask_load > load_delta_thresh_pct) 
-                        kvm->last_interactive_seqnum = kvm->monitor_seqnum;     /* extend interactive phase */
-        }
+        trace_kvm_load_info(kvm, vm_load, eff_vm_load, reactive_gtask_load);
 
         /* determine whether interactive phase continues or not */
-        if (in_interactive_phase(kvm)) {
-                kvm->monitor_seqnum++;
+        if (load_prof_enabled && in_interactive_phase(kvm, now)) {
                 kvm->monitor_timestamp = now;
-                mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(kvm->monitor_interval_in_msec));
+                mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(load_prof_period_msec));
+                return;
         }
-        else {
-                struct task_struct *task = NULL;
-                struct pid *pid;
-                struct kvm_vcpu *vcpu = kvm->vcpus[0];
 
-                trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
-                kvm->interactive_phase = NORMAL_PHASE;
+finish_interactive_phase:
+        trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
+        kvm->interactive_phase = NORMAL_PHASE;
+        clear_gtask_flags(kvm);
 
-                /* connect to scheduler core for notification of the end of interactive phase */
-                rcu_read_lock();
-                pid = rcu_dereference(vcpu->pid);
-                if (pid)
-                        task = get_pid_task(vcpu->pid, PIDTYPE_PID);
-                rcu_read_unlock();
-                if (task) {
-                        set_interactive_phase(&task->se, NORMAL_PHASE);
-                        put_task_struct(task);
-                }
+        /* connect to scheduler core for notification of the end of interactive phase */
+        rcu_read_lock();
+        pid = rcu_dereference(kvm->vcpus[0]->pid);
+        if (pid)
+                task = get_pid_task(kvm->vcpus[0]->pid, PIDTYPE_PID);
+        rcu_read_unlock();
+        if (task) {
+                set_interactive_phase(&task->se, NORMAL_PHASE);
+                put_task_struct(task);
         }
-        trace_kvm_load_info(kvm, vm_load, eff_vm_load, reactive_gtask_load);
 }
 
 static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, 
@@ -734,15 +743,19 @@ void destroy_task_aware_vcpu(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(destroy_task_aware_vcpu);
 
-void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int duration_in_msec)
+#define DOUBLE_CLICK_DELAY      (500 * NSEC_PER_MSEC)   /* by default: 500ms */
+void start_load_monitor(struct kvm *kvm, unsigned long long now)
 {
         if (!load_monitor_enabled)
                 return;
         
-        if (!timer_pending(&kvm->load_timer) || kvm->monitor_seqnum >= 3) {  /* FIXME: hardcoded 3 (>= 360ms) */
+        if (!timer_pending(&kvm->load_timer) || 
+            (now - kvm->user_input_timestamp) < DOUBLE_CLICK_DELAY) {
                 int vidx;
                 struct kvm_vcpu *vcpu;
                 unsigned long long pre_monitor_duration = (LOAD_EPOCH_TIME_IN_NSEC * (NR_LOAD_ENTRIES - 1)) + load_epoch_offset(now);
+                unsigned long duration_jiffies =
+                        msecs_to_jiffies(load_prof_enabled ? load_prof_period_msec : max_interactive_phase_msec);
 
                 del_timer_sync(&kvm->load_timer);
                 if (kvm->interactive_phase)
@@ -762,11 +775,9 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now, unsigned int du
                         else
                                 vcpu->pre_monitor_run_delay = 0;
                 }
-                kvm->monitor_seqnum = kvm->last_interactive_seqnum = 0;
-                kvm->monitor_timestamp = now;
-                kvm->monitor_interval_in_msec = duration_in_msec;
+                kvm->user_input_timestamp = kvm->monitor_timestamp = now;
                 check_pre_monitor_period(kvm, now, pre_monitor_duration);
-                mod_timer(&kvm->load_timer, jiffies + msecs_to_jiffies(duration_in_msec));
+                mod_timer(&kvm->load_timer, jiffies + duration_jiffies);
         }
 }
 EXPORT_SYMBOL_GPL(start_load_monitor);
