@@ -203,10 +203,14 @@ static inline unsigned long get_cur_guest_task_id(struct kvm_vcpu *vcpu)
  * Windows has a separate system task
  */
 #define is_system_task(kvm, gtask)   (kvm->system_task_id == gtask->id)
-void check_system_task(struct kvm_vcpu *vcpu)
+void check_on_hlt(struct kvm_vcpu *vcpu)
 {
         struct kvm *kvm = vcpu->kvm;
 
+        /* cummulative run delay should be reset since no longer cpu is needed */
+        vcpu->prev_run_delay = vcpu->run_delay;
+
+        /* inspect whether the vm has a dedicated system task */
         if (!vcpu->cur_guest_task)
                 return;
 
@@ -217,7 +221,7 @@ void check_system_task(struct kvm_vcpu *vcpu)
                 kvm->system_task_id = -1;      /* if diverged, assume no system task */
         trace_kvm_system_task(vcpu->vcpu_id, kvm->system_task_id, vcpu->cur_guest_task->id);
 }
-EXPORT_SYMBOL_GPL(check_system_task);
+EXPORT_SYMBOL_GPL(check_on_hlt);
 
 static inline void init_load_monitor(void)
 {
@@ -565,7 +569,7 @@ finish_interactive_phase:
 }
 
 static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, 
-                                       unsigned long long now, int first_sched)
+                                       unsigned long long now)
 {
         int bg_nice = get_bg_vcpu_nice(vcpu);
 
@@ -592,20 +596,6 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
                 vcpu->bg_nice = bg_nice;
 
                 update_vcpu_flags(current, vcpu->flags, vcpu->bg_nice);
-        }
-
-        /* TODO: optimization! */
-        if (first_sched) {
-                int i;
-                struct kvm_vcpu *iter_vcpu;
-                kvm_for_each_vcpu(i, iter_vcpu, vcpu->kvm) {
-                        if (i == vcpu->vcpu_id)
-                                continue;
-                        cpumask_clear_cpu(vcpu->vcpu_id, &iter_vcpu->urgent_vcpu_mask);
-                        trace_kvm_urgent_vcpu_info(iter_vcpu->vcpu_id, iter_vcpu->urgent_vcpu_mask.bits[0]);
-                }
-                if (!cpumask_empty(&vcpu->urgent_vcpu_mask))
-                        vcpu_yield();
         }
 }
 
@@ -654,7 +644,7 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
 
         /* accounting for arriving */ 
         next = &guest_task->threads[vcpu->vcpu_id];
-        guest_thread_arrive(vcpu, next, now, 0);
+        guest_thread_arrive(vcpu, next, now);
 }
 EXPORT_SYMBOL_GPL(track_guest_task);
 
@@ -682,7 +672,7 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
         if (unlikely(!cur_guest_thread))
                 return;
         trace_kvm_vcpu_switch_arrive(vcpu->vcpu_id, vcpu->run_delay, vcpu->state, vcpu->flags);
-        guest_thread_arrive(vcpu, cur_guest_thread, now, 1);
+        guest_thread_arrive(vcpu, cur_guest_thread, now);
 }
 
 /*
@@ -695,12 +685,8 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
         unsigned long long now = sched_clock();
 
         /* vcpu state change for run_delay (wait time) accounting */
-        if (likely(vcpu->state == VCPU_RUNNING) && !current->se.on_rq) {        /* to be blocked */
+        if (likely(vcpu->state == VCPU_RUNNING) && !current->se.on_rq)  /* to be blocked */
                 set_vcpu_state(vcpu, VCPU_BLOCKED);
-
-                /* cummulative run delay should be reset since no longer cpu is needed */
-                vcpu->prev_run_delay = vcpu->run_delay;
-        }
         else    /* to wait */
                 set_vcpu_state(vcpu, VCPU_WAITING);
 
@@ -750,7 +736,7 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now)
                 return;
         
         if (!timer_pending(&kvm->load_timer) || 
-            (now - kvm->user_input_timestamp) < DOUBLE_CLICK_DELAY) {
+            (now - kvm->user_input_timestamp) > DOUBLE_CLICK_DELAY) {
                 int vidx;
                 struct kvm_vcpu *vcpu;
                 unsigned long long pre_monitor_duration = (LOAD_EPOCH_TIME_IN_NSEC * (NR_LOAD_ENTRIES - 1)) + load_epoch_offset(now);
@@ -758,8 +744,11 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now)
                         msecs_to_jiffies(load_prof_enabled ? load_prof_period_msec : max_interactive_phase_msec);
 
                 del_timer_sync(&kvm->load_timer);
-                if (kvm->interactive_phase)
+                if (kvm->interactive_phase) {
                         trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
+                        kvm->interactive_phase = NORMAL_PHASE;
+                        clear_gtask_flags(kvm);
+                }
 
                 kvm_for_each_vcpu(vidx, vcpu, kvm) {
                         /* if last_arrival > t -> pre_monitor_run_delay = run_delay - prev_run_delay,

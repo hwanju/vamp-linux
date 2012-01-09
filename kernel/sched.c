@@ -2081,6 +2081,12 @@ int __list_add_urgent_vcpu(struct task_struct *p, struct sched_entity *se, int f
                 if (!sysctl_kvm_ipi_grp_first && se->my_q)
                         break;
 
+                if (!force_enqueue && cfs_rq->curr == se) {
+                        if (!se->my_q)          /* if entity is task, */
+                                pending = 0;    /* delivered promptly */
+                        continue;
+                }
+
                 /* urgent_vcpu flag indicates ipi is pending or is being processed 
                  * Two purposes: 1) when enqueued, also enqueued into urgent_vcpu_list 
                  *               2) protect from being preempted during ipi processing, 
@@ -2088,11 +2094,6 @@ int __list_add_urgent_vcpu(struct task_struct *p, struct sched_entity *se, int f
                  */
                 se->urgent_vcpu = 1;
 
-                if (!force_enqueue && cfs_rq->curr == se) {
-                        if (!se->my_q)          /* if entity is task, */
-                                pending = 0;    /* delivered promptly */
-                        continue;
-                }
                 trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, cfs_rq->curr != se);
                 if (!force_enqueue && !se->on_rq)
                         continue;
@@ -2143,18 +2144,6 @@ void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nic
         }
 }
 EXPORT_SYMBOL_GPL(update_vcpu_flags);
-
-void vcpu_yield(void)
-{
-	struct rq *rq = this_rq_lock();
-
-	schedstat_inc(rq, yld_count);
-	current->sched_class->yield_task(rq);
-        resched_task(current);
-
-	do_raw_spin_unlock(&rq->lock);
-}
-EXPORT_SYMBOL_GPL(vcpu_yield);
 #endif
 
 #include "sched_idletask.c"

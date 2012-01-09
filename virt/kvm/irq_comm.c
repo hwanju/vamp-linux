@@ -92,12 +92,6 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			kvm_is_dm_lowest_prio(irq))
 		printk(KERN_INFO "kvm: apic: phys broadcast and lowest prio\n");
 
-#ifdef CONFIG_KVM_VDI
-        /* initialize urgent_vcpu_mask */
-        if (sysctl_kvm_ipi_first && 
-            irq->ipi == 1 && is_sync_ipi(kvm, irq->vector))
-                cpumask_clear(&src->vcpu->urgent_vcpu_mask);
-#endif
 	kvm_for_each_vcpu(i, vcpu, kvm) {
 		if (!kvm_apic_present(vcpu))
 			continue;
@@ -112,18 +106,15 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
                             (is_sync_ipi(kvm, irq->vector) || is_resched_ipi(kvm, irq->vector))) {
                                 struct task_struct *task = NULL;
                                 struct pid *pid;
-                                int pending;
+
                                 rcu_read_lock();
                                 pid = rcu_dereference(vcpu->pid);
                                 if (pid)
                                         task = get_pid_task(vcpu->pid, PIDTYPE_PID);
                                 rcu_read_unlock();
                                 if (task) {
-                                        if (is_sync_ipi(kvm, irq->vector)) {
-                                                pending = list_add_urgent_vcpu(task);
-                                                if (pending)
-                                                        cpumask_set_cpu(i, &src->vcpu->urgent_vcpu_mask);
-                                        }
+                                        if (is_sync_ipi(kvm, irq->vector))
+                                                list_add_urgent_vcpu(task);
                                         else if (is_resched_ipi(kvm, irq->vector))
                                                 set_resched_vcpu(task);
                                         put_task_struct(task);
@@ -140,18 +131,9 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 				lowest = vcpu;
 		}
 	}
-
 	if (lowest)
 		r = kvm_apic_set_irq(lowest, irq);
 
-#ifdef CONFIG_KVM_VDI
-        if (sysctl_kvm_ipi_first && 
-            irq->ipi == 1 && is_sync_ipi(kvm, irq->vector) &&
-            !cpumask_empty(&src->vcpu->urgent_vcpu_mask)) {
-                trace_kvm_urgent_vcpu_info(src->vcpu->vcpu_id, src->vcpu->urgent_vcpu_mask.bits[0]);
-                vcpu_yield();
-        }
-#endif
 	return r;
 }
 

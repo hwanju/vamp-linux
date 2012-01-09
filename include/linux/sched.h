@@ -2740,9 +2740,7 @@ extern void set_resched_vcpu(struct task_struct *p);
 #define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
 #define VF_BACKGROUND_ON_RQ     (VF_BACKGROUND  << VF_SHIFT)    /* I'm on runq as an background vcpu (only for se's vcpu_flags) */
 extern void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice);
-extern void vcpu_yield(void);
 extern int get_interactive_count(int cpu);
-extern int find_interactiveless_cpu(int this_cpu, struct task_struct *p);
 #endif
 
 #endif /* __KERNEL__ */

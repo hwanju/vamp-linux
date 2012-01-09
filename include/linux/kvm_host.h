@@ -184,9 +184,6 @@ struct kvm_vcpu {
         unsigned int cur_load_avg;
         unsigned long long cur_run_delay;
         unsigned int reactive_gthread_load;             /* accumulated load of increased guest threads */
-        
-        /* ipi-aware */
-        cpumask_t urgent_vcpu_mask;
 #endif
 
 	struct kvm_vcpu_arch arch;

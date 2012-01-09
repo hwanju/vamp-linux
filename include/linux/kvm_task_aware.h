@@ -68,5 +68,5 @@ void destroy_task_aware_vcpu(struct kvm_vcpu *vcpu);
 int init_task_aware_agent(void);
 void destroy_task_aware_agent(void);
 void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id);
-void check_system_task(struct kvm_vcpu *vcpu);
+void check_on_hlt(struct kvm_vcpu *vcpu);
 #endif

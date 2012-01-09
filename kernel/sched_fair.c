@@ -403,7 +403,6 @@ int get_interactive_count(int cpu)
 {
         return per_cpu(interactive_count, cpu);
 }
-EXPORT_SYMBOL_GPL(get_interactive_count);
 #endif
 
 /*
