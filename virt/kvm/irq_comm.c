@@ -102,8 +102,9 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 
 		if (!kvm_is_dm_lowest_prio(irq)) {
 #ifdef CONFIG_KVM_VDI
-                        if (sysctl_kvm_ipi_first && irq->ipi == 1 && i != src->vcpu->vcpu_id && 
-                            (is_sync_ipi(kvm, irq->vector) || is_resched_ipi(kvm, irq->vector))) {
+                        if (irq->ipi == 1 && i != src->vcpu->vcpu_id && 
+                            ((sysctl_kvm_ipi_first && is_sync_ipi(kvm, irq->vector)) || 
+                            (sysctl_kvm_resched_no_preempt && is_resched_ipi(kvm, irq->vector)))) {
                                 struct task_struct *task = NULL;
                                 struct pid *pid;
 

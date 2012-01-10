@@ -374,6 +374,15 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 	{
+		.procname	= "kvm_resched_no_preempt",
+		.data		= &sysctl_kvm_resched_no_preempt,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one,
+	},
+	{
 		.procname	= "kvm_ipi_tslice_ns",
 		.data		= &sysctl_kvm_ipi_tslice_ns,
 		.maxlen		= sizeof(unsigned int),

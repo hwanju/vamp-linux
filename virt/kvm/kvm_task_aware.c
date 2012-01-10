@@ -583,7 +583,7 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
         }
 
         if (vcpu->cur_guest_task->flags & VF_BACKGROUND) 
-                trace_kvm_bg_vcpu(vcpu, get_bg_vcpu_nice(vcpu));
+                trace_kvm_bg_vcpu(vcpu, bg_nice);
 
         trace_kvm_gthread_switch_arrive(get_cur_guest_task_id(vcpu), 
                         vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
@@ -591,12 +591,9 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, struct guest_threa
                         vcpu->cur_guest_task->flags);
         set_guest_thread_state(guest_thread, GUEST_THREAD_RUNNING);
 
-        if (vcpu->flags != vcpu->cur_guest_task->flags || vcpu->bg_nice != bg_nice) {
+        /* vcpu shadows the type of the currently running guest task */
+        if (update_vcpu_flags(current, vcpu->cur_guest_task->flags, bg_nice)) 
                 vcpu->flags = vcpu->cur_guest_task->flags;      /* copy gtask flags to vcpu flags */
-                vcpu->bg_nice = bg_nice;
-
-                update_vcpu_flags(current, vcpu->flags, vcpu->bg_nice);
-        }
 }
 
 static inline void guest_thread_depart(struct kvm_vcpu *vcpu, struct guest_thread_info *guest_thread, unsigned long long now)

@@ -1075,6 +1075,9 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 
 	if (cfs_rq->nr_running == 1)
 		list_add_leaf_cfs_rq(cfs_rq);
+#ifdef CONFIG_KVM_VDI
+        trace_sched_enqueue_entity(entity_is_task(se) ? task_of(se) : NULL, se);
+#endif
 }
 
 static void __clear_buddies_last(struct sched_entity *se)
@@ -1970,9 +1973,9 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 	s64 gran, vdiff = curr->vruntime - se->vruntime;
 
 #ifdef CONFIG_KVM_VDI
-        if (curr->urgent_vcpu)
+        if (sysctl_kvm_ipi_first && curr->urgent_vcpu)
                 return 0;
-        if (se->resched_vcpu)
+        if (sysctl_kvm_resched_no_preempt && se->resched_vcpu)
                 return 0;
         /* this check can be done before vdiff comparison, because this condition is always carried out
          * between sibling vcpus where fairness doesn't have to be met */

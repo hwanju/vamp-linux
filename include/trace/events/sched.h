@@ -518,53 +518,27 @@ TRACE_EVENT(balsched_clear_affinity,
                         __entry->tgid, __entry->pid, __entry->nr_running_vcpus, __entry->nr_running_bg_vcpus, __entry->cpu_allowed_mask)
 )
 #endif
-#ifdef CONFIG_KVM_VDI   /* hwandori-experimental */
-TRACE_EVENT(sched_ipi_futex,
+#ifdef CONFIG_KVM_VDI
+TRACE_EVENT(sched_enqueue_entity,
 
-	TP_PROTO(struct task_struct *source_task, struct task_struct *target_task),
+	TP_PROTO(struct task_struct *tsk, struct sched_entity *se),
 
-	TP_ARGS(source_task, target_task),
+	TP_ARGS(tsk, se),
 
 	TP_STRUCT__entry(
-		__field( pid_t, source_pid              )
-		__field( int,	source_type             )
-		__field( pid_t,	target_pid              )
-		__field( int,	target_type             )
+		__field( pid_t, tgid            )
+		__field( pid_t,	pid             )
+		__field( u64,	vruntime        )
 	),
 
 	TP_fast_assign(
-		__entry->source_pid             = source_task->pid;
-                __entry->source_type            = source_task->se.urgent_vcpu;
-		__entry->target_pid             = target_task->pid;
-                __entry->target_type            = target_task->se.urgent_vcpu;
+		__entry->tgid           = tsk ? tsk->tgid : -1;
+		__entry->pid            = tsk ? tsk->pid  : -1;
+                __entry->vruntime       = se->vruntime;
 	),
 
-	TP_printk("source_pid=%d (type=%d) -> target_pid=%d (type=%d)",
-                __entry->source_pid, __entry->source_type, __entry->target_pid, __entry->target_type)
-);
-
-TRACE_EVENT(sched_interactive_load,
-
-	TP_PROTO(int cpu, int is_this_cpu, s64 load, int interactive_count),
-
-	TP_ARGS(cpu, is_this_cpu, load, interactive_count),
-
-	TP_STRUCT__entry(
-		__field( int,   cpu                     )
-		__field( int,	is_this_cpu             )
-		__field( s64,	load                    )
-		__field( int,	interactive_count       )
-	),
-
-	TP_fast_assign(
-		__entry->cpu                    = cpu;
-                __entry->is_this_cpu            = is_this_cpu;
-		__entry->load                   = load;
-                __entry->interactive_count      = interactive_count;
-	),
-
-	TP_printk("cpu=%d is_this_cpu=%d load=%lld interactive_count=%d",
-                __entry->cpu, __entry->is_this_cpu, __entry->load, __entry->interactive_count)
+	TP_printk("tgid=%d pid=%d vruntime=%lld",
+                __entry->tgid, __entry->pid, __entry->vruntime)
 );
 TRACE_EVENT(ipi_list_debug,
         TP_PROTO(int op, struct task_struct *p, int cpu, int cond1, int cond2),

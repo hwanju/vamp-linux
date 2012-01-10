@@ -2019,6 +2019,7 @@ static inline unsigned int get_sysctl_timer_migration(void)
 extern unsigned int sysctl_kvm_ipi_first;
 extern unsigned int sysctl_kvm_ipi_grp_first;
 extern unsigned int sysctl_kvm_ipi_tslice_ns;
+extern unsigned int sysctl_kvm_resched_no_preempt;
 extern unsigned int sysctl_kvm_inter_vm_preempt;
 extern unsigned int sysctl_kvm_intra_vm_preempt;
 extern unsigned int sysctl_kvm_amvp;
@@ -2739,7 +2740,7 @@ extern void set_resched_vcpu(struct task_struct *p);
 #define VF_BACKGROUND           0x00000002                      /* I have background workloads */
 #define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
 #define VF_BACKGROUND_ON_RQ     (VF_BACKGROUND  << VF_SHIFT)    /* I'm on runq as an background vcpu (only for se's vcpu_flags) */
-extern void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice);
+extern int update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice);
 extern int get_interactive_count(int cpu);
 #endif
 

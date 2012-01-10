@@ -2065,6 +2065,8 @@ EXPORT_SYMBOL_GPL(set_interactive_phase);
 unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
 EXPORT_SYMBOL_GPL(sysctl_kvm_ipi_first);
 unsigned int __read_mostly sysctl_kvm_ipi_grp_first= 0;
+unsigned int __read_mostly sysctl_kvm_resched_no_preempt = 0;
+EXPORT_SYMBOL_GPL(sysctl_kvm_resched_no_preempt);
 unsigned int __read_mostly sysctl_kvm_amvp         = 0;
 EXPORT_SYMBOL_GPL(sysctl_kvm_amvp);
 unsigned int __read_mostly sysctl_kvm_amvp_sched   = 0;
@@ -2132,16 +2134,22 @@ void set_resched_vcpu(struct task_struct *p)
 }
 EXPORT_SYMBOL_GPL(set_resched_vcpu);
 
-void update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
+int update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
 {
-        p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
+        /* to prevent the currently urgent vcpu from being preempted due to priority drop */
+        if ((new_flags & VF_BACKGROUND) && p->se.urgent_vcpu)
+                return 0;
 
-        if (sysctl_kvm_amvp && !p->se.urgent_vcpu) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
+        if (sysctl_kvm_amvp) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
                 if (new_flags & VF_BACKGROUND)
                         set_user_nice(p, bg_nice);
                 else
                         set_user_nice(p, 0);
         }
+        /* update se's vcpu_flags with new_flags, while retaining on_rq status */
+        p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
+        return 1;
+
 }
 EXPORT_SYMBOL_GPL(update_vcpu_flags);
 #endif
