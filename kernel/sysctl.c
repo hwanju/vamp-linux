@@ -390,6 +390,13 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 	},
 	{
+		.procname	= "kvm_urgent_grp_preempt_ns",
+		.data		= &sysctl_kvm_urgent_grp_preempt_ns,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+	},
+	{
 		.procname	= "kvm_inter_vm_preempt",
 		.data		= &sysctl_kvm_inter_vm_preempt,
 		.maxlen		= sizeof(unsigned int),

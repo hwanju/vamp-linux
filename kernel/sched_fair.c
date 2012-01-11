@@ -91,7 +91,8 @@ unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
 #ifdef CONFIG_KVM_VDI
 #include <linux/kvm_task_aware.h>
 
-unsigned int __read_mostly sysctl_kvm_ipi_tslice_ns    = 100000UL;      /* default 100us */
+unsigned int __read_mostly sysctl_kvm_ipi_tslice_ns    = 100000UL;              /* default 100us */
+unsigned int __read_mostly sysctl_kvm_urgent_grp_preempt_ns = 24000000UL;       /* FIXME: default 24000000ns */
 unsigned int __read_mostly sysctl_kvm_inter_vm_preempt = 0;
 unsigned int __read_mostly sysctl_kvm_intra_vm_preempt = 0;
 
@@ -1255,18 +1256,18 @@ static int
 wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se);
 
 #ifdef CONFIG_KVM_VDI
-static int can_urgently_preempt(struct sched_entity *curr, struct sched_entity *se)
+static int can_urgently_preempt(struct sched_entity *left, struct sched_entity *se)
 {
         trace_ipi_list_debug(4, entity_is_task(se) ? task_of(se) : NULL, 
-                        se->cfs_rq->rq->cpu, se->vruntime - se->cfs_rq->min_vruntime, se->vruntime - curr->vruntime);
+                        se->cfs_rq->rq->cpu, se->vruntime - se->cfs_rq->min_vruntime, se->vruntime - left->vruntime);
 
         if (entity_is_task(se))
                 return 1;
-        if (se->vruntime - curr->vruntime < sysctl_sched_latency)
+        if (se->vruntime - left->vruntime < sysctl_kvm_urgent_grp_preempt_ns)
                 return 1;
 
         trace_ipi_list_debug(5, entity_is_task(se) ? task_of(se) : NULL, 
-                        se->cfs_rq->rq->cpu, se->vruntime - se->cfs_rq->min_vruntime, se->vruntime - curr->vruntime);
+                        se->cfs_rq->rq->cpu, se->vruntime - se->cfs_rq->min_vruntime, se->vruntime - left->vruntime);
         return 0;
 }
 #endif
@@ -1288,9 +1289,17 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 
         list_for_each_entry_safe(p, n, &cfs_rq->urgent_vcpu_list, urgent_vcpu_node) {
                 trace_ipi_list_debug(3, entity_is_task(p) ? task_of(p) : NULL, se->cfs_rq->rq->cpu, p->on_rq, cfs_rq_of(p) == cfs_rq);
+                if (!p->on_rq || cfs_rq_of(p) != cfs_rq)
+                        list_del_init(&p->urgent_vcpu_node);
+                else if (can_urgently_preempt(left, p)) {
+                        list_del_init(&p->urgent_vcpu_node);
+                        return p;
+                }
+#if 0           /* original code */
                 list_del_init(&p->urgent_vcpu_node);
                 if (p->on_rq && cfs_rq_of(p) == cfs_rq && can_urgently_preempt(left, p))
                         return p;
+#endif
         }
 #endif
 	/*

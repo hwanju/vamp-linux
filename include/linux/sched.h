@@ -2019,6 +2019,7 @@ static inline unsigned int get_sysctl_timer_migration(void)
 extern unsigned int sysctl_kvm_ipi_first;
 extern unsigned int sysctl_kvm_ipi_grp_first;
 extern unsigned int sysctl_kvm_ipi_tslice_ns;
+extern unsigned int sysctl_kvm_urgent_grp_preempt_ns;
 extern unsigned int sysctl_kvm_resched_no_preempt;
 extern unsigned int sysctl_kvm_inter_vm_preempt;
 extern unsigned int sysctl_kvm_intra_vm_preempt;
