@@ -102,6 +102,8 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 
 		if (!kvm_is_dm_lowest_prio(irq)) {
 #ifdef CONFIG_KVM_VDI
+                        if (irq->ipi == 1)
+                                trace_kvm_ipi_delivery(irq->vector, src->vcpu->vcpu_id, i);
                         if (irq->ipi == 1 && i != src->vcpu->vcpu_id && 
                             ((sysctl_kvm_ipi_first && is_sync_ipi(kvm, irq->vector)) || 
                             (sysctl_kvm_resched_no_preempt && is_resched_ipi(kvm, irq->vector)))) {

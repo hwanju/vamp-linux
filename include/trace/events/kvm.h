@@ -599,6 +599,27 @@ TRACE_EVENT(kvm_system_task,
         TP_printk("vcpu_id=%d system_task_id=%lu cur_task_id=%lu",
                 __entry->vcpu_id, __entry->system_task_id, __entry->cur_task_id)
 );
+TRACE_EVENT(kvm_ipi_delivery,
+        TP_PROTO(u32 vector, int src_vcpu_id, int dst_vcpu_id),
+
+        TP_ARGS(vector, src_vcpu_id, dst_vcpu_id),
+
+        TP_STRUCT__entry(
+                __field( u32,   vector)
+                __field( int,   src_vcpu_id)
+                __field( int,   dst_vcpu_id)
+        ),
+
+        TP_fast_assign(
+                __entry->vector = vector;
+                __entry->src_vcpu_id    = src_vcpu_id;
+                __entry->dst_vcpu_id    = dst_vcpu_id;
+        ),
+
+        TP_printk("vector=%x src_vcpu_id=%d dst_vcpu_id=%d",
+                        __entry->vector, __entry->src_vcpu_id, __entry->dst_vcpu_id)
+
+);
 #endif /* CONFIG_KVM_VDI */
 #endif /* _TRACE_KVM_MAIN_H */
 
