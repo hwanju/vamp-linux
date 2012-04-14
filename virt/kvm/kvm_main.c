@@ -251,6 +251,9 @@ void kvm_vcpu_uninit(struct kvm_vcpu *vcpu)
 	put_pid(vcpu->pid);
 	kvm_arch_vcpu_uninit(vcpu);
 	free_page((unsigned long)vcpu->run);
+#ifdef CONFIG_KVM_VDI
+	destroy_task_aware_vcpu(vcpu);
+#endif
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_uninit);
 
@@ -1670,9 +1673,6 @@ static int kvm_vm_ioctl_create_vcpu(struct kvm *kvm, u32 id)
 vcpu_destroy:
 	mutex_unlock(&kvm->lock);
 	kvm_arch_vcpu_destroy(vcpu);
-#ifdef CONFIG_KVM_VDI
-        destroy_task_aware_vcpu(vcpu);
-#endif
 	return r;
 }
 

@@ -817,9 +817,6 @@ void exit_kvm_load_monitor(struct kvm *kvm)
         printk(KERN_INFO "kvm-ta: guest task hash freed\n" );
 
         del_timer_sync(&kvm->load_timer);
-
-        kvm_for_each_vcpu(i, vcpu, kvm)
-                destroy_task_aware_vcpu(vcpu);
 }
 EXPORT_SYMBOL_GPL(exit_kvm_load_monitor);
 
