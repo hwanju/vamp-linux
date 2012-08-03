@@ -212,8 +212,4 @@ static inline void exit_pi_state_list(struct task_struct *curr)
   (((op & 0xf) << 28) | ((cmp & 0xf) << 24)		\
    | ((oparg & 0xfff) << 12) | (cmparg & 0xfff))
 
-#ifdef CONFIG_KVM_VDI
-/* hwandori-experimental */
-extern struct task_struct *get_futex_owner(struct task_struct *p);
-#endif
 #endif

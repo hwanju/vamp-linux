@@ -390,7 +390,7 @@ TRACE_EVENT(sched_pi_setprio,
 			__entry->comm, __entry->pid,
 			__entry->oldprio, __entry->newprio)
 );
-#ifdef CONFIG_BALANCE_SCHED
+#ifdef CONFIG_KVM_VDI
 TRACE_EVENT(sched_group_weight,
 
 	TP_PROTO(struct task_struct *p, unsigned long group_weight, u64 group_vruntime),
@@ -418,107 +418,6 @@ TRACE_EVENT(sched_group_weight,
 	TP_printk("tgid=%d pid=%d weight=%lu group_weight=%lu vruntime=%llu group_vruntime=%llu",
                 __entry->tgid, __entry->pid, __entry->weight, __entry->group_weight, __entry->vruntime, __entry->group_vruntime)
 );
-TRACE_EVENT(balsched_cpu_stat,
-	TP_PROTO(struct task_struct *p, int cpu, unsigned long weighted_cpuload, int load_imbalance, unsigned long nr_running_vcpus, int interactive_count),
-
-	TP_ARGS(p, cpu, weighted_cpuload, load_imbalance, nr_running_vcpus, interactive_count),
-
-	TP_STRUCT__entry(
-		__field( int,           tgid                    )
-		__field( int,           pid                     )
-		__field( int,           cpu                     )
-		__field( unsigned long, weighted_cpuload        )
-		__field( int,           load_imbalance          )
-		__field( unsigned long, nr_running_vcpus        )
-		__field( int,           interactive_count       )
-	),
-
-	TP_fast_assign(
-		__entry->tgid                   = p->tgid;
-		__entry->pid                    = p->pid;
-		__entry->weighted_cpuload       = weighted_cpuload;
-		__entry->load_imbalance         = load_imbalance;
-		__entry->nr_running_vcpus       = nr_running_vcpus;
-		__entry->interactive_count      = interactive_count;
-	),
-
-	TP_printk("tgid=%d pid=%d cpu=%d weighted_cpuload=%lu load_imbalance=%d nr_running_vcpus=%lu interactive_count=%d",
-                __entry->tgid, __entry->pid, __entry->cpu, __entry->weighted_cpuload, __entry->load_imbalance, __entry->nr_running_vcpus, __entry->interactive_count)
-);
-TRACE_EVENT(balsched_affinity,
-	TP_PROTO(struct task_struct *p, int affinity_updated, unsigned long affinity_bit),
-
-	TP_ARGS(p, affinity_updated, affinity_bit),
-
-	TP_STRUCT__entry(
-		__field( int,           tgid                    )
-		__field( int,           pid                     )
-		__field( int,           affinity_updated        )
-		__field( unsigned long, affinity_bit            )
-	),
-
-	TP_fast_assign(
-		__entry->tgid                   = p->tgid;
-		__entry->pid                    = p->pid;
-		__entry->affinity_updated       = affinity_updated;
-		__entry->affinity_bit           = affinity_bit;
-	),
-
-	TP_printk("tgid=%d pid=%d affinity_updated=%d affinity_bit=%02lx",
-                __entry->tgid, __entry->pid, __entry->affinity_updated, __entry->affinity_bit)
-);
-TRACE_EVENT(balsched_cpu_load,
-        TP_PROTO(int cpu, unsigned long weight, s64 expected_load, unsigned long cur_total_weight, s64 cpu_load, unsigned long weight_per_cpu),
-
-        TP_ARGS(cpu, weight, expected_load, cur_total_weight, cpu_load, weight_per_cpu),
-
-        TP_STRUCT__entry(
-                __field( int,   cpu)
-                __field( unsigned long, weight)
-                __field( s64,   expected_load)
-                __field( unsigned long, cur_total_weight)
-                __field( s64,   cpu_load)
-                __field( unsigned long, weight_per_cpu)
-        ),
-
-        TP_fast_assign(
-                __entry->cpu    = cpu;
-                __entry->weight = weight;
-                __entry->expected_load  = expected_load;
-                __entry->cur_total_weight       = cur_total_weight;
-                __entry->cpu_load       = cpu_load;
-                __entry->weight_per_cpu = weight_per_cpu;
-        ),
-
-        TP_printk("cpu=%d weight=%lu expected_load=%lld cur_total_weight=%lu cpu_load=%lld weight_per_cpu=%lu",
-                       __entry->cpu, __entry->weight, __entry->expected_load, __entry->cur_total_weight, __entry->cpu_load, __entry->weight_per_cpu)
-)
-TRACE_EVENT(balsched_clear_affinity,
-        TP_PROTO(struct task_struct *p, int nr_running_vcpus, int nr_running_bg_vcpus, unsigned long cpu_allowed_mask),
-
-        TP_ARGS(p, nr_running_vcpus, nr_running_vcpus, cpu_allowed_mask),
-
-        TP_STRUCT__entry(
-                __field( int,   tgid)
-                __field( int,   pid)
-                __field( int,   nr_running_vcpus)
-                __field( int,   nr_running_bg_vcpus)
-                __field( unsigned long, cpu_allowed_mask)
-        ),
-
-        TP_fast_assign(
-                __entry->tgid   = p->tgid;
-                __entry->pid    = p->pid;
-                __entry->nr_running_vcpus       = nr_running_vcpus;
-                __entry->nr_running_bg_vcpus    = nr_running_bg_vcpus;
-                __entry->cpu_allowed_mask       = cpu_allowed_mask;
-        ),
-
-        TP_printk("tgid=%d pid=%d nr_running_vcpus=%d nr_running_bg_vcpus=%d cpu_allowed_mask=%lx",
-                        __entry->tgid, __entry->pid, __entry->nr_running_vcpus, __entry->nr_running_bg_vcpus, __entry->cpu_allowed_mask)
-)
-#endif
-#ifdef CONFIG_KVM_VDI
 TRACE_EVENT(sched_enqueue_entity,
 
 	TP_PROTO(struct task_struct *tsk, struct sched_entity *se),
@@ -539,32 +438,6 @@ TRACE_EVENT(sched_enqueue_entity,
 
 	TP_printk("tgid=%d pid=%d vruntime=%lld",
                 __entry->tgid, __entry->pid, __entry->vruntime)
-);
-TRACE_EVENT(ipi_list_debug,
-        TP_PROTO(int op, struct task_struct *p, int cpu, int cond1, int cond2),
-
-        TP_ARGS(op, p, cpu, cond1, cond2),
-
-        TP_STRUCT__entry(
-                __field( int,   op)
-                __field( int,   tgid)
-                __field( int,   pid)
-                __field( int,   cpu)
-                __field( int,   cond1)
-                __field( int,   cond2)
-        ),
-
-        TP_fast_assign(
-                __entry->op     = op;
-                __entry->tgid   = p ? p->tgid : -1;
-                __entry->pid    = p ? p->pid : -1;
-                __entry->cpu    = cpu;
-                __entry->cond1  = cond1;
-                __entry->cond2  = cond2;
-        ),
-
-        TP_printk("op=%d tgid=%d pid=%d cpu=%d cond1=%d cond2=%d",
-                        __entry->op, __entry->tgid, __entry->pid, __entry->cpu, __entry->cond1, __entry->cond2)
 );
 #endif
 

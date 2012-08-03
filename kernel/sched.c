@@ -244,17 +244,6 @@ struct cfs_rq;
 
 static LIST_HEAD(task_groups);
 
-#ifdef CONFIG_BALANCE_SCHED
-enum balsched_mode {
-        BALSCHED_DISABLED = 0,
-        BALSCHED_ALL,                   /* 1 */
-        BALSCHED_VCPUS,                 /* 2 */
-        BALSCHED_ALL_FAIR,              /* 3 */
-        BALSCHED_VCPUS_FAIR,            /* 4 */
-};
-#define is_fair_balsched(tg)       (tg->balsched == BALSCHED_ALL_FAIR || tg->balsched == BALSCHED_VCPUS_FAIR)
-#endif
-
 /* task group related information */
 struct task_group {
 	struct cgroup_subsys_state css;
@@ -285,11 +274,6 @@ struct task_group {
 
 #ifdef CONFIG_SCHED_AUTOGROUP
 	struct autogroup *autogroup;
-#endif
-
-#ifdef CONFIG_BALANCE_SCHED
-        enum balsched_mode balsched;
-        int balsched_state;             /* BALSCHED_STATE_* (-1,0,1) */
 #endif
 
 #ifdef CONFIG_KVM_VDI
@@ -330,7 +314,7 @@ struct task_group root_task_group;
 struct cfs_rq {
 	struct load_weight load;
 	unsigned long nr_running;
-#ifdef CONFIG_BALANCE_SCHED
+#ifdef CONFIG_KVM_VDI
         unsigned long nr_running_vcpus; 
 #endif
 
@@ -346,7 +330,6 @@ struct cfs_rq {
 	struct list_head tasks;
 	struct list_head *balance_iterator;
 #ifdef CONFIG_KVM_VDI
-	struct list_head urgent_vcpu_list;
         unsigned long nr_running_bg_vcpus; 
 #endif
 
@@ -2062,85 +2045,12 @@ void set_interactive_phase(struct sched_entity *se, int interactive_phase)
 }
 EXPORT_SYMBOL_GPL(set_interactive_phase);
 
-unsigned int __read_mostly sysctl_kvm_ipi_first    = 0;
-EXPORT_SYMBOL_GPL(sysctl_kvm_ipi_first);
-unsigned int __read_mostly sysctl_kvm_ipi_grp_first= 0;
-unsigned int __read_mostly sysctl_kvm_resched_no_preempt = 0;
-EXPORT_SYMBOL_GPL(sysctl_kvm_resched_no_preempt);
-unsigned int __read_mostly sysctl_kvm_amvp         = 0;
-EXPORT_SYMBOL_GPL(sysctl_kvm_amvp);
-unsigned int __read_mostly sysctl_kvm_amvp_sched   = 0;
-
-int __list_add_urgent_vcpu(struct task_struct *p, struct sched_entity *se, int force_enqueue)
-{
-        struct cfs_rq *cfs_rq = se->cfs_rq;
-        int need_resched = 0;
-        int pending = 1;
-
-        for (; se; se = se->parent) {
-                cfs_rq = se->cfs_rq;
-
-                if (!sysctl_kvm_ipi_grp_first && se->my_q)
-                        break;
-
-                if (!force_enqueue && cfs_rq->curr == se) {
-                        if (!se->my_q)          /* if entity is task, */
-                                pending = 0;    /* delivered promptly */
-                        continue;
-                }
-
-                /* urgent_vcpu flag indicates ipi is pending or is being processed 
-                 * Two purposes: 1) when enqueued, also enqueued into urgent_vcpu_list 
-                 *               2) protect from being preempted during ipi processing, 
-                 *                  but preemption by tick is allowed
-                 */
-                se->urgent_vcpu = 1;
-
-                trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, cfs_rq->curr != se);
-                if (!force_enqueue && !se->on_rq)
-                        continue;
-                trace_ipi_list_debug(1, p, se->cfs_rq->rq->cpu, se->on_rq, list_empty(&se->urgent_vcpu_node));
-                if (list_empty(&se->urgent_vcpu_node)) {
-                        list_add_tail(&se->urgent_vcpu_node, &cfs_rq->urgent_vcpu_list);
-                        need_resched = 1;
-                }
-        }
-        if (need_resched && !cfs_rq->rq->curr->se.urgent_vcpu)
-                resched_task(cfs_rq->rq->curr);
-
-        return pending;
-}
-int list_add_urgent_vcpu(struct task_struct *p)
-{
-        struct rq *rq;
-        unsigned long flags;
-        int pending;
-
-        if (!sysctl_kvm_ipi_first)
-                return 0;
-
-        rq = task_rq_lock(p, &flags);
-        pending = __list_add_urgent_vcpu(p, &p->se, 0);
-        task_rq_unlock(rq, p, &flags); 
-
-        return pending;
-}
-EXPORT_SYMBOL_GPL(list_add_urgent_vcpu);
-
-void set_resched_vcpu(struct task_struct *p)
-{
-        BUG_ON(p->se.my_q);     /* assert entity is leaf node (vcpu) */
-        p->se.resched_vcpu = 1;
-}
-EXPORT_SYMBOL_GPL(set_resched_vcpu);
+unsigned int __read_mostly sysctl_kvm_vamp         = 0;
+EXPORT_SYMBOL_GPL(sysctl_kvm_vamp);
 
 int update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
 {
-        /* to prevent the currently urgent vcpu from being preempted due to priority drop */
-        if ((new_flags & VF_BACKGROUND) && p->se.urgent_vcpu)
-                return 0;
-
-        if (sysctl_kvm_amvp) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
+        if (sysctl_kvm_vamp) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
                 if (new_flags & VF_BACKGROUND)
                         set_user_nice(p, bg_nice);
                 else
@@ -2504,35 +2414,6 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 	int dest_cpu;
 	const struct cpumask *nodemask = cpumask_of_node(cpu_to_node(cpu));
 
-#ifdef CONFIG_BALANCE_SCHED
-        struct task_group *tg = p->se.cfs_rq->tg;
-        if (is_fair_balsched(tg)) {
-                unsigned long wl, min_weight = -1UL;
-                int min_weight_cpu = -1;
-                /* Look for allowed, online CPU in same node. */
-                for_each_cpu_and(dest_cpu, nodemask, cpu_active_mask) {
-                        if (cpumask_test_cpu(dest_cpu, &p->cpus_allowed)) {
-                                wl = weighted_cpuload(dest_cpu);
-                                if (wl < min_weight) {
-                                        min_weight = wl;
-                                        min_weight_cpu = dest_cpu;
-                                }
-                        }
-                }
-                if (min_weight_cpu >= 0) 
-                        return min_weight_cpu;
-                for_each_cpu_and(dest_cpu, &p->cpus_allowed, cpu_active_mask) {
-                        wl = weighted_cpuload(dest_cpu);
-                        if (wl < min_weight) {
-                                min_weight = wl;
-                                min_weight_cpu = dest_cpu;
-                        }
-                }
-                if (min_weight_cpu >= 0) 
-                        return min_weight_cpu;
-                goto not_found;
-        }
-#endif  /* CONFIG_BALANCE_SCHED */
 	/* Look for allowed, online CPU in same node. */
 	for_each_cpu_and(dest_cpu, nodemask, cpu_active_mask)
 		if (cpumask_test_cpu(dest_cpu, &p->cpus_allowed))
@@ -2543,9 +2424,6 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 	if (dest_cpu < nr_cpu_ids)
 		return dest_cpu;
 
-#ifdef CONFIG_BALANCE_SCHED
-not_found:
-#endif
 	/* No more Mr. Nice Guy. */
 	dest_cpu = cpuset_cpus_allowed_fallback(p);
 	/*
@@ -2561,138 +2439,13 @@ not_found:
 	return dest_cpu;
 }
 
-#ifdef CONFIG_BALANCE_SCHED
-unsigned int __read_mostly sysctl_balsched_load_imbalance_pct = 150;
-static inline int cause_load_imbalance(struct task_group *tg, int cpu, 
-                unsigned long weight, unsigned long cur_total_weight)
-{
-        unsigned long weight_per_cpu;
-        s64 expected_load, cpu_load;
-        if (!is_fair_balsched(tg) || !cur_total_weight || 
-            !weighted_cpuload(cpu) || !sysctl_balsched_load_imbalance_pct)
-                return 0;
-        expected_load = effective_load(tg, cpu, weight, weight);
-        cpu_load = weighted_cpuload(cpu) + expected_load;
-        cur_total_weight += expected_load - effective_load(tg, cpu, 0, weight);
-        weight_per_cpu = cur_total_weight / num_active_cpus();
-        weight_per_cpu *= sysctl_balsched_load_imbalance_pct;
-        weight_per_cpu /= 100;
-
-        trace_balsched_cpu_load(cpu, weight, expected_load, cur_total_weight, cpu_load, weight_per_cpu);
-
-        return cpu_load > weight_per_cpu;
-}
-
-static inline int try_to_balance_affine(struct task_struct *p)
-{
-        int i; 
-        int selected_cpu = -1;
-        struct sched_entity *se = &p->se;
-        struct task_group *tg = se->cfs_rq->tg;
-        cpumask_t balanced_cpus_allowed;
-        int affinity_updated = 0;
-        unsigned long cur_total_weight = 0;
-
-        if (tg->balsched_state == BALSCHED_STATE_DISABLED && !sysctl_kvm_amvp_sched)
-                return selected_cpu;
-
-        cpus_clear(balanced_cpus_allowed);
-        if (is_fair_balsched(tg)) {
-                for_each_cpu(i, cpu_active_mask)
-                        cur_total_weight += weighted_cpuload(i) + effective_load(tg, i, 0, se->load.weight);
-        }
-        if ((tg->balsched == BALSCHED_ALL || tg->balsched == BALSCHED_ALL_FAIR) && likely(!se->on_rq)) {
-                for_each_cpu(i, cpu_active_mask) {
-                        /* !tg->se[i]->on_rq means its queue has no task */
-                        if (likely(tg->se[i]) && !tg->se[i]->on_rq && 
-                            !cause_load_imbalance(tg, i, se->load.weight, cur_total_weight)) {
-                                cpu_set(i, balanced_cpus_allowed);
-                                affinity_updated = 1;
-                        }
-                }
-                /* if no idle cpu exists, return the affinity to all cpus */
-                if (!affinity_updated) {
-                        cpus_setall(balanced_cpus_allowed);
-                        affinity_updated = 1;
-                }
-        }
-        else if (tg->balsched == BALSCHED_VCPUS && likely(!se->on_rq) && se->is_vcpu) {
-                for_each_cpu(i, cpu_active_mask) {
-                        /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
-                        if (likely(tg->se[i] && tg->se[i]->my_q) && !tg->se[i]->my_q->nr_running_vcpus) {
-                                cpu_set(i, balanced_cpus_allowed);
-                                affinity_updated = 1;
-                        }
-                        trace_balsched_cpu_stat(p, i, weighted_cpuload(i), -1, 
-                                        tg->se[i]->my_q->nr_running_vcpus, get_interactive_count(i));
-                }
-                if (se->is_vcpu)
-                        trace_balsched_affinity(p, affinity_updated, balanced_cpus_allowed.bits[0]);
-                /* if no idle cpu exists, return the affinity to all cpus */
-                if (!affinity_updated) {
-                        cpus_setall(balanced_cpus_allowed);
-                        affinity_updated = 1;
-                }
-        }
-        else if (tg->balsched == BALSCHED_VCPUS_FAIR && likely(!se->on_rq)) {
-                int load_imbalance = 0;
-                if (se->is_vcpu && !tg->interactive_phase) {
-                        for_each_cpu(i, cpu_active_mask) {
-                                /* although tg->se[i]->on_rq is true, its queue may have no vcpu */
-                                if (likely(tg->se[i] && tg->se[i]->my_q)) {
-                                        if (!tg->se[i]->my_q->nr_running_vcpus &&
-                                            !(load_imbalance = cause_load_imbalance(tg, i, se->load.weight, cur_total_weight)) &&
-                                            !get_interactive_count(i)) {
-                                                cpu_set(i, balanced_cpus_allowed);
-                                                affinity_updated = 1;
-                                        }
-                                        trace_balsched_cpu_stat(p, i, weighted_cpuload(i), load_imbalance, 
-                                                        tg->se[i]->my_q->nr_running_vcpus, get_interactive_count(i));
-                                }
-                        }
-                }
-                if (se->is_vcpu)
-                        trace_balsched_affinity(p, affinity_updated, balanced_cpus_allowed.bits[0]);
-
-                /* if no idle cpu exists, return the affinity to all cpus */
-                if (!affinity_updated) {
-                        cpus_setall(balanced_cpus_allowed);
-                        affinity_updated = 1;
-                }
-        }
-        if (sysctl_kvm_amvp_sched && sysctl_kvm_amvp && 
-                 tg->interactive_phase && is_interactive_vcpu(se)) {
-                for_each_cpu(i, cpu_active_mask) {
-                        if (likely(tg->se[i] && tg->se[i]->my_q)) {
-                                if (tg->se[i]->cfs_rq->curr == tg->se[i] ||
-                                    (!tg->se[i]->on_rq && tg->se[i]->vruntime < tg->se[i]->cfs_rq->min_vruntime)) {
-                                        selected_cpu = i;
-                                        break;
-                                }
-                        }
-                }
-        }
-        /* if found, update affinity */
-        if (affinity_updated)
-                p->cpus_allowed = balanced_cpus_allowed;
-
-        return selected_cpu;
-}
-#endif
-
 /*
  * The caller (fork, wakeup) owns p->pi_lock, ->cpus_allowed is stable.
  */
 static inline
 int select_task_rq(struct task_struct *p, int sd_flags, int wake_flags)
 {
-#ifdef CONFIG_BALANCE_SCHED
-        int cpu = try_to_balance_affine(p);
-        if (cpu < 0) 
-	        cpu = p->sched_class->select_task_rq(p, sd_flags, wake_flags);
-#else
 	int cpu = p->sched_class->select_task_rq(p, sd_flags, wake_flags);
-#endif
 
 	/*
 	 * In order not to call set_task_cpu() on a blocking task we need
@@ -3092,9 +2845,6 @@ static void __sched_fork(struct task_struct *p)
 	p->se.nr_migrations		= 0;
 	p->se.vruntime			= 0;
 	INIT_LIST_HEAD(&p->se.group_node);
-#ifdef CONFIG_KVM_VDI
-	INIT_LIST_HEAD(&p->se.urgent_vcpu_node);
-#endif
 
 #ifdef CONFIG_SCHEDSTATS
 	memset(&p->se.statistics, 0, sizeof(p->se.statistics));
@@ -4548,13 +4298,8 @@ need_resched:
 
 	schedule_debug(prev);
 
-#ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
-	hrtick_clear(rq);
-#else
 	if (sched_feat(HRTICK))
 		hrtick_clear(rq);
-#endif
 
 	raw_spin_lock_irq(&rq->lock);
 
@@ -8195,9 +7940,6 @@ static void init_cfs_rq(struct cfs_rq *cfs_rq, struct rq *rq)
 {
 	cfs_rq->tasks_timeline = RB_ROOT;
 	INIT_LIST_HEAD(&cfs_rq->tasks);
-#ifdef CONFIG_KVM_VDI
-	INIT_LIST_HEAD(&cfs_rq->urgent_vcpu_list);
-#endif
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	cfs_rq->rq = rq;
 	/* allow initial update_cfs_load() to truncate */
@@ -8270,9 +8012,6 @@ static void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
 	se->my_q = cfs_rq;
 	update_load_set(&se->load, 0);
 	se->parent = parent;
-#ifdef CONFIG_KVM_VDI
-	INIT_LIST_HEAD(&se->urgent_vcpu_node);
-#endif
 }
 #endif
 
@@ -9291,32 +9030,6 @@ static u64 cpu_shares_read_u64(struct cgroup *cgrp, struct cftype *cft)
 }
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 
-#ifdef CONFIG_BALANCE_SCHED
-static int cpu_balsched_write_u64(struct cgroup *cgrp, struct cftype *cftype,
-                u64 shareval)
-{
-        struct task_group *tg = cgroup_tg(cgrp);
-
-	/* We can't enable balance scheduling for the root cgroup. */
-	if (!tg->se[0])
-		return -EINVAL;
-
-        tg->balsched = (enum balsched_mode) shareval;
-        if (tg->balsched)
-                enable_balsched(tg);
-        else
-                disable_balsched(tg);
-        return 0;
-}
-
-static u64 cpu_balsched_read_u64(struct cgroup *cgrp, struct cftype *cft)
-{
-        struct task_group *tg = cgroup_tg(cgrp);
-
-        return (u64) tg->balsched;
-}
-#endif
-
 #ifdef CONFIG_RT_GROUP_SCHED
 static int cpu_rt_runtime_write(struct cgroup *cgrp, struct cftype *cft,
 				s64 val)
@@ -9360,13 +9073,6 @@ static struct cftype cpu_files[] = {
 		.read_u64 = cpu_rt_period_read_uint,
 		.write_u64 = cpu_rt_period_write_uint,
 	},
-#endif
-#ifdef CONFIG_BALANCE_SCHED
-        {
-                .name = "balsched",
-                .read_u64 = cpu_balsched_read_u64,
-                .write_u64 = cpu_balsched_write_u64,
-        },
 #endif
 };
 

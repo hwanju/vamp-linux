@@ -179,7 +179,6 @@ static int ioapic_deliver(struct kvm_ioapic *ioapic, int irq)
 	irqe.level = 1;
 	irqe.shorthand = 0;
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
         irqe.ipi = 0;
 #endif
 

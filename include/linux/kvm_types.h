@@ -66,7 +66,6 @@ struct kvm_lapic_irq {
 	u32 shorthand;
 	u32 dest_id;
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
         u32 ipi;
 #endif
 };

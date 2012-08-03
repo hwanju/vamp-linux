@@ -499,7 +499,6 @@ static void apic_send_ipi(struct kvm_lapic *apic)
 	else
 		irq.dest_id = GET_APIC_DEST_FIELD(icr_high);
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
         irq.ipi = 1;
 #endif
 

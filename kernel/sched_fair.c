@@ -91,11 +91,6 @@ unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
 #ifdef CONFIG_KVM_VDI
 #include <linux/kvm_task_aware.h>
 
-unsigned int __read_mostly sysctl_kvm_ipi_tslice_ns    = 100000UL;              /* default 100us */
-unsigned int __read_mostly sysctl_kvm_urgent_grp_preempt_ns = 24000000UL;       /* FIXME: default 24000000ns */
-unsigned int __read_mostly sysctl_kvm_inter_vm_preempt = 0;
-unsigned int __read_mostly sysctl_kvm_intra_vm_preempt = 0;
-
 static inline int is_interactive_vcpu(struct sched_entity *se)
 {
         return (se->is_vcpu &&
@@ -105,9 +100,6 @@ static inline int is_interactive_vcpu(struct sched_entity *se)
 }
 #endif
 
-#ifdef CONFIG_BALANCE_SCHED     /* for tracing per-cpu grp entity share */
-#define entity_is_l1_group(se)  (!se->parent && se->my_q)
-#endif
 static const struct sched_class fair_sched_class;
 
 /**************************************************************
@@ -384,6 +376,7 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 
 #ifdef CONFIG_KVM_VDI
 #include <linux/kvm_task_aware.h>
+/* currently not used, but will be exploitted */
 static int is_interactive_phase(struct cfs_rq *rq)
 {
         if (unlikely(!rq))
@@ -444,10 +437,6 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 	rb_link_node(&se->run_node, parent, link);
 	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);
-#ifdef CONFIG_KVM_VDI
-        if (se->urgent_vcpu) 
-                __list_add_urgent_vcpu(entity_is_task(se) ? task_of(se) : NULL, se, 1);
-#endif
 }
 
 static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
@@ -736,13 +725,11 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		add_cfs_task_weight(cfs_rq, se->load.weight);
 		list_add(&se->group_node, &cfs_rq->tasks);
 	}
-#ifdef CONFIG_BALANCE_SCHED
+#ifdef CONFIG_KVM_VDI
         if (se->is_vcpu) {
                 se->is_vcpu = VCPU_SE;
                 cfs_rq->nr_running_vcpus++;
         }
-#endif
-#ifdef CONFIG_KVM_VDI
         if (is_interactive_vcpu(se)) {
                 se->vcpu_flags |= VF_INTERACTIVE_ON_RQ;
                 inc_interactive_count(cpu_of(rq_of(cfs_rq)));
@@ -765,11 +752,9 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		add_cfs_task_weight(cfs_rq, -se->load.weight);
 		list_del_init(&se->group_node);
 	}
-#ifdef CONFIG_BALANCE_SCHED
+#ifdef CONFIG_KVM_VDI
         if (se->is_vcpu == VCPU_SE)
                 cfs_rq->nr_running_vcpus--;
-#endif
-#ifdef CONFIG_KVM_VDI
         if (se->vcpu_flags & VF_INTERACTIVE_ON_RQ) {
                 se->vcpu_flags &= ~VF_INTERACTIVE_ON_RQ;
                 dec_interactive_count(cpu_of(rq_of(cfs_rq)));
@@ -1166,13 +1151,6 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 
 	update_min_vruntime(cfs_rq);
 	update_cfs_shares(cfs_rq);
-#ifdef CONFIG_KVM_VDI
-        /* in case of migration, safely delete from ipi pending list */
-        if (likely(se->urgent_vcpu_node.next) && !list_empty(&se->urgent_vcpu_node)) {
-                trace_ipi_list_debug(2, entity_is_task(se) ? task_of(se) : NULL, se->cfs_rq->rq->cpu, 1, 1);
-                list_del_init(&se->urgent_vcpu_node);
-        }
-#endif
 }
 
 /*
@@ -1183,10 +1161,6 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
 	unsigned long ideal_runtime, delta_exec;
 
-#ifdef CONFIG_KVM_VDI
-        if (curr->urgent_vcpu)
-		resched_task(rq_of(cfs_rq)->curr);
-#endif
 	ideal_runtime = sched_slice(cfs_rq, curr);
 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
 	if (delta_exec > ideal_runtime) {
@@ -1255,23 +1229,6 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 static int
 wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se);
 
-#ifdef CONFIG_KVM_VDI
-static int can_urgently_preempt(struct sched_entity *left, struct sched_entity *se)
-{
-        trace_ipi_list_debug(4, entity_is_task(se) ? task_of(se) : NULL, 
-                        se->cfs_rq->rq->cpu, se->vruntime - se->cfs_rq->min_vruntime, se->vruntime - left->vruntime);
-
-        if (entity_is_task(se))
-                return 1;
-        if (se->vruntime - left->vruntime < sysctl_kvm_urgent_grp_preempt_ns)
-                return 1;
-
-        trace_ipi_list_debug(5, entity_is_task(se) ? task_of(se) : NULL, 
-                        se->cfs_rq->rq->cpu, se->vruntime - se->cfs_rq->min_vruntime, se->vruntime - left->vruntime);
-        return 0;
-}
-#endif
-
 /*
  * Pick the next process, keeping these things in mind, in this order:
  * 1) keep things fair between processes/task groups
@@ -1284,24 +1241,6 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 	struct sched_entity *se = __pick_first_entity(cfs_rq);
 	struct sched_entity *left = se;
 
-#ifdef CONFIG_KVM_VDI
-        struct sched_entity *p, *n;
-
-        list_for_each_entry_safe(p, n, &cfs_rq->urgent_vcpu_list, urgent_vcpu_node) {
-                trace_ipi_list_debug(3, entity_is_task(p) ? task_of(p) : NULL, se->cfs_rq->rq->cpu, p->on_rq, cfs_rq_of(p) == cfs_rq);
-                if (!p->on_rq || cfs_rq_of(p) != cfs_rq)
-                        list_del_init(&p->urgent_vcpu_node);
-                else if (can_urgently_preempt(left, p)) {
-                        list_del_init(&p->urgent_vcpu_node);
-                        return p;
-                }
-#if 0           /* original code */
-                list_del_init(&p->urgent_vcpu_node);
-                if (p->on_rq && cfs_rq_of(p) == cfs_rq && can_urgently_preempt(left, p))
-                        return p;
-#endif
-        }
-#endif
 	/*
 	 * Avoid running the skip buddy, if running something else can
 	 * be done without getting too unfair.
@@ -1339,12 +1278,6 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 		update_curr(cfs_rq);
 
 	check_spread(cfs_rq, prev);
-#ifdef CONFIG_KVM_VDI
-        if (entity_is_task(prev) || 
-            list_empty(&group_cfs_rq(prev)->urgent_vcpu_list))
-                prev->urgent_vcpu = 0;
-        prev->resched_vcpu = 0;
-#endif
 	if (prev->on_rq) {
 		update_stats_wait_start(cfs_rq, prev);
 		/* Put 'current' back into the tree. */
@@ -1419,11 +1352,6 @@ static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
 
 		hrtick_start(rq, delta);
 	}
-#ifdef CONFIG_KVM_VDI
-        else if (se->urgent_vcpu && 
-                        cpu_active(cpu_of(rq)) && hrtimer_is_hres_active(&rq->hrtick_timer)) 
-                hrtick_start(rq, sysctl_kvm_ipi_tslice_ns);
-#endif
 }
 
 /*
@@ -1981,25 +1909,8 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 {
 	s64 gran, vdiff = curr->vruntime - se->vruntime;
 
-#ifdef CONFIG_KVM_VDI
-        if (sysctl_kvm_ipi_first && curr->urgent_vcpu)
-                return 0;
-        if (sysctl_kvm_resched_no_preempt && se->resched_vcpu)
-                return 0;
-        /* this check can be done before vdiff comparison, because this condition is always carried out
-         * between sibling vcpus where fairness doesn't have to be met */
-        if (sysctl_kvm_intra_vm_preempt &&
-            !is_interactive_vcpu(curr) && is_interactive_vcpu(se))
-                return 1;
-#endif
 	if (vdiff <= 0)
 		return -1;
-#ifdef CONFIG_KVM_VDI
-        if (sysctl_kvm_inter_vm_preempt &&
-            !is_interactive_phase(curr->my_q) && is_interactive_phase(se->my_q))
-                return 1;
-#endif
-
 	gran = wakeup_gran(curr, se);
 	if (vdiff > gran)
 		return 1;
@@ -2218,9 +2129,6 @@ int can_migrate_task(struct task_struct *p, struct rq *rq, int this_cpu,
 		     int *all_pinned)
 {
 	int tsk_cache_hot = 0;
-#ifdef CONFIG_BALANCE_SCHED
-        int soft_affinity = 0;
-#endif
 	/*
 	 * We do not migrate tasks that are:
 	 * 1) running (obviously), or
@@ -2228,20 +2136,10 @@ int can_migrate_task(struct task_struct *p, struct rq *rq, int this_cpu,
 	 * 3) are cache-hot on their current CPU.
 	 */
 	if (!cpumask_test_cpu(this_cpu, &p->cpus_allowed)) {
-#ifdef CONFIG_BALANCE_SCHED
-                if (is_fair_balsched(p->se.cfs_rq->tg) || 
-                    (sysctl_kvm_amvp_sched && p->se.parent)) {
-                        soft_affinity = 1;
-                        goto skip_affinity_violation;
-                }
-#endif
 		schedstat_inc(p, se.statistics.nr_failed_migrations_affine);
 		return 0;
 	}
 	*all_pinned = 0;
-#ifdef CONFIG_BALANCE_SCHED
-skip_affinity_violation:
-#endif
 
 	if (task_running(rq, p)) {
 		schedstat_inc(p, se.statistics.nr_failed_migrations_running);
@@ -2263,28 +2161,13 @@ skip_affinity_violation:
 			schedstat_inc(p, se.statistics.nr_forced_migrations);
 		}
 #endif
-#ifdef CONFIG_BALANCE_SCHED
-                goto migrate_ok;
-#else
 		return 1;
-#endif
 	}
 
 	if (tsk_cache_hot) {
 		schedstat_inc(p, se.statistics.nr_failed_migrations_hot);
 		return 0;
 	}
-#ifdef CONFIG_BALANCE_SCHED
-migrate_ok:
-        if (soft_affinity) {
-                cpu_set(this_cpu, p->cpus_allowed);
-                *all_pinned = 0;
-                trace_balsched_clear_affinity(p, 
-                                p->se.cfs_rq->tg->se[this_cpu]->my_q->nr_running_vcpus, 
-                                p->se.cfs_rq->tg->se[this_cpu]->my_q->nr_running_bg_vcpus, 
-                                p->cpus_allowed.bits[0]); 
-        }
-#endif
 	return 1;
 }
 

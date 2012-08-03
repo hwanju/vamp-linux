@@ -1166,14 +1166,6 @@ struct sched_statistics {
 };
 #endif
 
-#ifdef CONFIG_BALANCE_SCHED
-#define BALSCHED_STATE_DISABLED 0
-#define BALSCHED_STATE_ENABLED  1
-#define enable_balsched(tg)     do { tg->balsched_state = BALSCHED_STATE_ENABLED; } while(0)
-#define disable_balsched(tg)    do { tg->balsched_state = BALSCHED_STATE_DISABLED; } while(0)
-extern unsigned int sysctl_balsched_load_imbalance_pct;
-#endif
-
 struct sched_entity {
 	struct load_weight	load;		/* for load-balancing */
 	struct rb_node		run_node;
@@ -1199,14 +1191,11 @@ struct sched_entity {
 	struct cfs_rq		*my_q;
 #endif
 
-#if (CONFIG_BALANCE_SCHED || CONFIG_KVM_VDI)
+#if CONFIG_KVM_VDI
 #define VCPU_SE         1
 #define NEW_VCPU_SE     2
         int is_vcpu;
         unsigned int vcpu_flags;
-        struct list_head urgent_vcpu_node;
-        int urgent_vcpu;
-        int resched_vcpu;
 #endif
 };
 
@@ -2016,15 +2005,7 @@ static inline unsigned int get_sysctl_timer_migration(void)
 #endif
 #ifdef CONFIG_KVM_VDI
 /* parameters */
-extern unsigned int sysctl_kvm_ipi_first;
-extern unsigned int sysctl_kvm_ipi_grp_first;
-extern unsigned int sysctl_kvm_ipi_tslice_ns;
-extern unsigned int sysctl_kvm_urgent_grp_preempt_ns;
-extern unsigned int sysctl_kvm_resched_no_preempt;
-extern unsigned int sysctl_kvm_inter_vm_preempt;
-extern unsigned int sysctl_kvm_intra_vm_preempt;
-extern unsigned int sysctl_kvm_amvp;
-extern unsigned int sysctl_kvm_amvp_sched;
+extern unsigned int sysctl_kvm_vamp;
 #endif
 extern unsigned int sysctl_sched_rt_period;
 extern int sysctl_sched_rt_runtime;
@@ -2731,8 +2712,6 @@ static inline unsigned long rlimit_max(unsigned int limit)
 #define NON_MIXED_INTERACTIVE_PHASE     1
 #define MIXED_INTERACTIVE_PHASE         2
 extern void set_interactive_phase(struct sched_entity *se, int interactive_phase);
-extern int list_add_urgent_vcpu(struct task_struct *p);
-extern void set_resched_vcpu(struct task_struct *p);
 
 /* VCPU flags */
 #define VF_SHIFT                16

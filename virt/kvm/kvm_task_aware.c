@@ -13,7 +13,7 @@
 #define set_vcpu_state(vcpu, state_value)     \
         set_mb(vcpu->state, (state_value))
 
-#define get_bg_vcpu_nice(vcpu)     (sysctl_kvm_amvp <= 19 ? sysctl_kvm_amvp : vcpu->bg_exec_time * (sysctl_kvm_amvp - 19) / (vcpu->exec_time + 1))
+#define get_bg_vcpu_nice(vcpu)     (sysctl_kvm_vamp <= 19 ? sysctl_kvm_vamp: vcpu->bg_exec_time * (sysctl_kvm_vamp - 19) / (vcpu->exec_time + 1))
 
 #define KVM_TA_DEBUG
 
@@ -341,9 +341,9 @@ module_param(bg_load_thresh_pct, uint, 0644);
 static unsigned int max_interactive_phase_msec = DEFAULT_MAX_INTERACTIVE_PHASE_MSEC;
 module_param(max_interactive_phase_msec, uint, 0644);
 
-#define DEFAULT_AMVP_MONITOR_WINDOW     30000000UL      /* 30ms */
-static unsigned long amvp_monitor_window = DEFAULT_AMVP_MONITOR_WINDOW;
-module_param(amvp_monitor_window, ulong, 0644);
+#define DEFAULT_LOAD_MONITOR_WINDOW     30000000UL      /* 30ms */
+static unsigned long load_monitor_window = DEFAULT_LOAD_MONITOR_WINDOW;
+module_param(load_monitor_window, ulong, 0644);
 
 static int load_prof_enabled = 0;
 module_param(load_prof_enabled, int, 0644);
@@ -695,7 +695,7 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
 
         trace_kvm_vcpu_switch_depart(vcpu->vcpu_id, now - vcpu->last_arrival, vcpu->state, vcpu->flags);
 
-        while (vcpu->exec_time > amvp_monitor_window) {
+        while (vcpu->exec_time > load_monitor_window) {
                 /* borrowed code from update_cfs_load */
 		asm("" : "+rm" (vcpu->exec_time));
 		vcpu->exec_time /= 2;

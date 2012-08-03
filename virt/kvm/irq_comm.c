@@ -23,10 +23,6 @@
 #include <linux/kvm_host.h>
 #include <linux/slab.h>
 #include <trace/events/kvm.h>
-#ifdef CONFIG_KVM_VDI
-#include <linux/sched.h>
-#include <linux/kvm_task_aware.h>
-#endif
 
 #include <asm/msidef.h>
 #ifdef CONFIG_IA64
@@ -101,29 +97,6 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			continue;
 
 		if (!kvm_is_dm_lowest_prio(irq)) {
-#ifdef CONFIG_KVM_VDI
-                        if (irq->ipi == 1)
-                                trace_kvm_ipi_delivery(irq->vector, src->vcpu->vcpu_id, i);
-                        if (irq->ipi == 1 && i != src->vcpu->vcpu_id && 
-                            ((sysctl_kvm_ipi_first && is_sync_ipi(kvm, irq->vector)) || 
-                            (sysctl_kvm_resched_no_preempt && is_resched_ipi(kvm, irq->vector)))) {
-                                struct task_struct *task = NULL;
-                                struct pid *pid;
-
-                                rcu_read_lock();
-                                pid = rcu_dereference(vcpu->pid);
-                                if (pid)
-                                        task = get_pid_task(vcpu->pid, PIDTYPE_PID);
-                                rcu_read_unlock();
-                                if (task) {
-                                        if (is_sync_ipi(kvm, irq->vector))
-                                                list_add_urgent_vcpu(task);
-                                        else if (is_resched_ipi(kvm, irq->vector))
-                                                set_resched_vcpu(task);
-                                        put_task_struct(task);
-                                }
-                        }
-#endif
 			if (r < 0)
 				r = 0;
 			r += kvm_apic_set_irq(vcpu, irq);
@@ -160,7 +133,6 @@ int kvm_set_msi(struct kvm_kernel_irq_routing_entry *e,
 	irq.level = 1;
 	irq.shorthand = 0;
 #ifdef CONFIG_KVM_VDI
-        /* hwandori-experimental */
         irq.ipi = 0;
 #endif
 
