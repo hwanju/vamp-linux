@@ -277,8 +277,11 @@ struct task_group {
 #endif
 
 #ifdef CONFIG_KVM_VDI
-        int interactive_phase;                  /* 0: normal phase, NON_MIXED_INTERACTIVE_PHASE: fast path, 
-                                                   MIXED_INTERACTIVE_PHASE: slow path */
+        /* 0: normal phase, 
+         * NON_MIXED_INTERACTIVE_PHASE: fast path, 
+         * MIXED_INTERACTIVE_PHASE: slow path 
+         */
+        int interactive_phase;  
 #endif
 };
 

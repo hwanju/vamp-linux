@@ -49,9 +49,12 @@
 #define KVM_REQ_APF_HALT          12
 
 #define KVM_USERSPACE_IRQ_SOURCE_ID	0
-
-#ifdef CONFIG_KVM_VDI   /* FIXME: new config replaces this, since the following depends on task-aware agent */
-#define LOAD_ENTRIES_SHIFT              4       /* TODO: changed into module parameter */ 
+   
+/* FIXME: new config replaces this, 
+ * since the following depends on task-aware agent */
+#ifdef CONFIG_KVM_VDI
+/* TODO: changed into module parameter */ 
+#define LOAD_ENTRIES_SHIFT              4
 #define NR_LOAD_ENTRIES                 (1<<LOAD_ENTRIES_SHIFT)   
 #endif
 
@@ -320,10 +323,11 @@ struct kvm {
         struct timer_list load_timer;
         u64 monitor_timestamp;
         u64 user_input_timestamp;
-
-        unsigned int pre_monitor_load;          /* aggregate vcpu load during pre-monitoring period */
-        int interactive_phase;                  /* 0: normal phase, NON_MIXED_INTERACTIVE_PHASE: fast path, 
-                                                   MIXED_INTERACTIVE_PHASE: slow path */
+        /* aggregate vcpu load during pre-monitoring period */
+        unsigned int pre_monitor_load;
+        int interactive_phase;  /* 0: normal phase, 
+                                 * NON_MIXED_INTERACTIVE_PHASE: fast path, 
+                                 * MIXED_INTERACTIVE_PHASE: slow path */
         unsigned long system_task_id;
         pid_t vm_id;    /* for tracing (non-mandatory) */
 #endif

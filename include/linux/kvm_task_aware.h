@@ -16,9 +16,12 @@
  */
 extern unsigned int load_period_shift;
 #define LOAD_EPOCH_TIME_IN_MSEC         (1 << load_period_shift)
-#define LOAD_EPOCH_TIME_IN_NSEC         (LOAD_EPOCH_TIME_IN_MSEC * NSEC_PER_MSEC)
-#define load_idx(epoch_id)              (unsigned int)((epoch_id) & (NR_LOAD_ENTRIES-1))
-#define load_epoch_id(time_in_ns)       ((time_in_ns / NSEC_PER_MSEC) >> load_period_shift)    /* TODO: find a convert function */
+#define LOAD_EPOCH_TIME_IN_NSEC \
+        (LOAD_EPOCH_TIME_IN_MSEC * NSEC_PER_MSEC)
+#define load_idx(epoch_id)      \
+        (unsigned int)((epoch_id) & (NR_LOAD_ENTRIES-1))
+#define load_epoch_id(time_in_ns)       \
+        ((time_in_ns / NSEC_PER_MSEC) >> load_period_shift)
 #define load_idx_by_time(time_in_ns)    (load_idx(load_epoch_id(time_in_ns)))
 #define load_epoch_offset(time_in_ns)   (time_in_ns % LOAD_EPOCH_TIME_IN_NSEC)
 
@@ -32,9 +35,10 @@ extern unsigned int load_period_shift;
 #define VCPU_RUNNING    2
 
 /* OS-aware */
-#define has_system_task(kvm)            (kvm->system_task_id != 0 && kvm->system_task_id != -1)    
-#define is_windows_os(kvm)              has_system_task(kvm)
-#define is_unix_os(kvm)                 (!is_windows_os(kvm))   /* FIXME: currently assuming Linux */
+#define has_system_task(kvm)    \
+        (kvm->system_task_id != 0 && kvm->system_task_id != -1)
+#define is_windows_os(kvm)              has_system_task(kvm) /*FIXME: Linux */
+#define is_unix_os(kvm)                 (!is_windows_os(kvm))
 #define is_sync_ipi(kvm, vector)        (is_windows_os(kvm) && vector == 0xe1)
 #define is_resched_ipi(kvm, vector)     (is_unix_os(kvm) && vector == 0xfd)
 
@@ -55,7 +59,9 @@ struct guest_thread_info {
 struct guest_task_struct {
         struct hlist_node link;
         unsigned long id;
-        unsigned int pre_monitor_load;  /* aggregate guest thread load (in pct) during pre-monitoring period */
+        /* aggregate guest thread load (in pct) 
+         * during pre-monitoring period */
+        unsigned int pre_monitor_load;
 	unsigned int flags;
         struct guest_thread_info threads[MAX_GUEST_TASK_VCPU];
 };

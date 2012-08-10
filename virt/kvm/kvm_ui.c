@@ -21,7 +21,8 @@ int kvm_ui_event(struct kvm *kvm, uint32_t arg)
         unsigned long long now = sched_clock();
 
         /* when an ui event is released, set the current timestamp into kvm */
-        if ((event_type == kvm_kbd_pressed && likely_load_gen_keys(event_info)) || 
+        if ((event_type == kvm_kbd_pressed && 
+             likely_load_gen_keys(event_info)) || 
             event_type == kvm_mouse_released)
                 start_load_monitor(kvm, now);
 

@@ -2611,10 +2611,10 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 
 	kvm_init_debug();
 #ifdef CONFIG_KVM_VDI
-        /* Though initialization failed, kvm_init() goes on with error message, 
+        /* Though initialization failed, kvm_init() goes on with error message,
          * since task-aware feature is best-effort */
         if( init_task_aware_agent() != 0 ) 
-                printk(KERN_ERR "kvm: task-aware agent initialization failed\n");
+                printk(KERN_ERR "kvm: task-aware agent init failed\n");
 #endif
 
 	return 0;
