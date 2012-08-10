@@ -73,7 +73,8 @@ static inline void account_cpu_load(struct kvm_vcpu *vcpu,
 	unsigned long long cur_load_epoch_id = load_epoch_id(now);
 
 	vcpu->exec_time += exec_time;
-	if (vcpu->flags & VF_BACKGROUND)
+	if (likely(vcpu->cur_guest_task) && 
+	    vcpu->cur_guest_task->flags & VF_BACKGROUND) 
 		vcpu->bg_exec_time += exec_time;
 	
 	for (i = guest_thread->load_epoch_id; i < cur_load_epoch_id; i++) {
