@@ -2052,8 +2052,10 @@ unsigned int __read_mostly sysctl_kvm_vamp         = 0;
 EXPORT_SYMBOL_GPL(sysctl_kvm_vamp);
 
 int update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
-{
-        if (sysctl_kvm_vamp) {  /* set_user_nice changes weight based on a type, and enq/deq for queued one */
+{  
+        if (sysctl_kvm_vamp) {
+                /* set_user_nice changes weight based on a type, 
+                 * and enq/deq for queued one */
                 if (new_flags & VF_BACKGROUND)
                         set_user_nice(p, bg_nice);
                 else
