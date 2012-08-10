@@ -93,10 +93,10 @@ unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
 
 static inline int is_interactive_vcpu(struct sched_entity *se)
 {
-        return (se->is_vcpu &&
-                (se->cfs_rq->tg->interactive_phase == NON_MIXED_INTERACTIVE_PHASE ||
-                (se->cfs_rq->tg->interactive_phase == MIXED_INTERACTIVE_PHASE && !(se->vcpu_flags & VF_BACKGROUND)))) ||
-               (se->cfs_rq->tg->interactive_phase && !se->is_vcpu);
+	return (se->is_vcpu &&
+		(se->cfs_rq->tg->interactive_phase == NON_MIXED_INTERACTIVE_PHASE ||
+		(se->cfs_rq->tg->interactive_phase == MIXED_INTERACTIVE_PHASE && !(se->vcpu_flags & VF_BACKGROUND)))) ||
+	       (se->cfs_rq->tg->interactive_phase && !se->is_vcpu);
 }
 #endif
 
@@ -379,23 +379,23 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 /* currently not used, but will be exploitted */
 static int is_interactive_phase(struct cfs_rq *rq)
 {
-        if (unlikely(!rq))
-                return 0;
+	if (unlikely(!rq))
+		return 0;
 
-        return rq->tg->interactive_phase;
+	return rq->tg->interactive_phase;
 }
 static DEFINE_PER_CPU_SHARED_ALIGNED(int, interactive_count);
 static inline void inc_interactive_count(int cpu)
 {
-        per_cpu(interactive_count, cpu)++;
+	per_cpu(interactive_count, cpu)++;
 }
 static inline void dec_interactive_count(int cpu)
 {
-        per_cpu(interactive_count, cpu)--;
+	per_cpu(interactive_count, cpu)--;
 }
 int get_interactive_count(int cpu)
 {
-        return per_cpu(interactive_count, cpu);
+	return per_cpu(interactive_count, cpu);
 }
 #endif
 
@@ -726,18 +726,18 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		list_add(&se->group_node, &cfs_rq->tasks);
 	}
 #ifdef CONFIG_KVM_VDI
-        if (se->is_vcpu) {
-                se->is_vcpu = VCPU_SE;
-                cfs_rq->nr_running_vcpus++;
-        }
-        if (is_interactive_vcpu(se)) {
-                se->vcpu_flags |= VF_INTERACTIVE_ON_RQ;
-                inc_interactive_count(cpu_of(rq_of(cfs_rq)));
-        }
-        else {
-                se->vcpu_flags |= VF_BACKGROUND_ON_RQ;
-                cfs_rq->nr_running_bg_vcpus++;
-        }
+	if (se->is_vcpu) {
+		se->is_vcpu = VCPU_SE;
+		cfs_rq->nr_running_vcpus++;
+	}
+	if (is_interactive_vcpu(se)) {
+		se->vcpu_flags |= VF_INTERACTIVE_ON_RQ;
+		inc_interactive_count(cpu_of(rq_of(cfs_rq)));
+	}
+	else {
+		se->vcpu_flags |= VF_BACKGROUND_ON_RQ;
+		cfs_rq->nr_running_bg_vcpus++;
+	}
 #endif
 	cfs_rq->nr_running++;
 }
@@ -753,16 +753,16 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		list_del_init(&se->group_node);
 	}
 #ifdef CONFIG_KVM_VDI
-        if (se->is_vcpu == VCPU_SE)
-                cfs_rq->nr_running_vcpus--;
-        if (se->vcpu_flags & VF_INTERACTIVE_ON_RQ) {
-                se->vcpu_flags &= ~VF_INTERACTIVE_ON_RQ;
-                dec_interactive_count(cpu_of(rq_of(cfs_rq)));
-        }
-        if (se->vcpu_flags & VF_BACKGROUND_ON_RQ) {
-                se->vcpu_flags &= ~VF_BACKGROUND_ON_RQ;
-                cfs_rq->nr_running_bg_vcpus--;
-        }
+	if (se->is_vcpu == VCPU_SE)
+		cfs_rq->nr_running_vcpus--;
+	if (se->vcpu_flags & VF_INTERACTIVE_ON_RQ) {
+		se->vcpu_flags &= ~VF_INTERACTIVE_ON_RQ;
+		dec_interactive_count(cpu_of(rq_of(cfs_rq)));
+	}
+	if (se->vcpu_flags & VF_BACKGROUND_ON_RQ) {
+		se->vcpu_flags &= ~VF_BACKGROUND_ON_RQ;
+		cfs_rq->nr_running_bg_vcpus--;
+	}
 #endif
 	cfs_rq->nr_running--;
 }
@@ -1062,7 +1062,7 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	if (cfs_rq->nr_running == 1)
 		list_add_leaf_cfs_rq(cfs_rq);
 #ifdef CONFIG_KVM_VDI
-        trace_sched_enqueue_entity(entity_is_task(se) ? task_of(se) : NULL, se);
+	trace_sched_enqueue_entity(entity_is_task(se) ? task_of(se) : NULL, se);
 #endif
 }
 
@@ -2036,9 +2036,9 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 	hrtick_start_fair(rq, p);
 
 #ifdef CONFIG_KVM_VDI
-        trace_sched_group_weight(p, 
-                se->cfs_rq->tg != &root_task_group ? se->cfs_rq->tg->se[cpu_of(rq)]->load.weight : 0, 
-                se->cfs_rq->tg != &root_task_group ? se->cfs_rq->tg->se[cpu_of(rq)]->vruntime : 0);
+	trace_sched_group_weight(p, 
+		se->cfs_rq->tg != &root_task_group ? se->cfs_rq->tg->se[cpu_of(rq)]->load.weight : 0, 
+		se->cfs_rq->tg != &root_task_group ? se->cfs_rq->tg->se[cpu_of(rq)]->vruntime : 0);
 #endif
 	return p;
 }

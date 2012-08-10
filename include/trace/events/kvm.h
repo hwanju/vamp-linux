@@ -308,8 +308,8 @@ TRACE_EVENT(
 
 #ifdef CONFIG_KVM_VDI
 TRACE_EVENT(kvm_vcpu_switch,
-	TP_PROTO(int op, int vcpu_id, u64 schedstat, int state, unsigned int flags),
-	TP_ARGS(op, vcpu_id, schedstat, state, flags),
+	TP_PROTO(int op, struct kvm_vcpu *vcpu, u64 schedstat),
+	TP_ARGS(op, vcpu, schedstat),
 
 	TP_STRUCT__entry(
 		__field(	int,		op              )
@@ -321,19 +321,19 @@ TRACE_EVENT(kvm_vcpu_switch,
 
 	TP_fast_assign(
 		__entry->op             = op;
-		__entry->vcpu_id        = vcpu_id;
+		__entry->vcpu_id        = vcpu->vcpu_id;
 		__entry->schedstat      = schedstat;
-		__entry->state          = state;
-		__entry->flags          = flags;
+		__entry->state          = vcpu->state;
+		__entry->flags          = vcpu->flags;
 	),
 
 	TP_printk("%s v%d %s=%llu state=%d flags=%u", __entry->op ? "arrive" : "depart", __entry->vcpu_id,
                 __entry->op ? "run_delay" : "exec_time", __entry->schedstat, __entry->state, __entry->flags)
 );
-#define trace_kvm_vcpu_switch_arrive(vcpu_id, schedstat, state, flags) \
-        trace_kvm_vcpu_switch(1, vcpu_id, schedstat, state, flags)
-#define trace_kvm_vcpu_switch_depart(vcpu_id, schedstat, state, flags) \
-        trace_kvm_vcpu_switch(0, vcpu_id, schedstat, state, flags)
+#define trace_kvm_vcpu_switch_arrive(vcpu, schedstat) \
+        trace_kvm_vcpu_switch(1, vcpu, schedstat)
+#define trace_kvm_vcpu_switch_depart(vcpu, schedstat) \
+        trace_kvm_vcpu_switch(0, vcpu, schedstat)
 
 TRACE_EVENT(kvm_gthread_switch,
 	TP_PROTO(int op, unsigned long guest_task_id, int vcpu_id, unsigned int load_idx, u64 cpu_load, unsigned int flags),
@@ -418,8 +418,8 @@ TRACE_EVENT(kvm_load_check,
         trace_kvm_load_check(0, vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)
 
 TRACE_EVENT(kvm_vcpu_stat,
-	TP_PROTO(int vm_id, int vcpu_id, u64 run_delay, unsigned int flags),
-	TP_ARGS(vm_id, vcpu_id, run_delay, flags),
+	TP_PROTO(int vm_id, struct kvm_vcpu *vcpu, u64 run_delay),
+	TP_ARGS(vm_id, vcpu, run_delay),
 
 	TP_STRUCT__entry(
 		__field(	int,            vm_id                   )
@@ -430,9 +430,9 @@ TRACE_EVENT(kvm_vcpu_stat,
 
 	TP_fast_assign(
                 __entry->vm_id                  = vm_id;
-                __entry->vcpu_id                = vcpu_id;
+                __entry->vcpu_id                = vcpu->vcpu_id;
 		__entry->run_delay              = run_delay;
-                __entry->flags                  = flags;
+                __entry->flags                  = vcpu->flags;
 	),
 
 	TP_printk("vm%d v%d run_delay=%llu flags=%u", 

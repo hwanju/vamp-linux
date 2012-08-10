@@ -277,11 +277,11 @@ struct task_group {
 #endif
 
 #ifdef CONFIG_KVM_VDI
-        /* 0: normal phase, 
-         * NON_MIXED_INTERACTIVE_PHASE: fast path, 
-         * MIXED_INTERACTIVE_PHASE: slow path 
-         */
-        int interactive_phase;  
+	/* 0: normal phase, 
+	 * NON_MIXED_INTERACTIVE_PHASE: fast path, 
+	 * MIXED_INTERACTIVE_PHASE: slow path 
+	 */
+	int interactive_phase;  
 #endif
 };
 
@@ -318,7 +318,7 @@ struct cfs_rq {
 	struct load_weight load;
 	unsigned long nr_running;
 #ifdef CONFIG_KVM_VDI
-        unsigned long nr_running_vcpus; 
+	unsigned long nr_running_vcpus; 
 #endif
 
 	u64 exec_clock;
@@ -333,7 +333,7 @@ struct cfs_rq {
 	struct list_head tasks;
 	struct list_head *balance_iterator;
 #ifdef CONFIG_KVM_VDI
-        unsigned long nr_running_bg_vcpus; 
+	unsigned long nr_running_bg_vcpus; 
 #endif
 
 	/*
@@ -2043,27 +2043,27 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 #ifdef CONFIG_KVM_VDI
 void set_interactive_phase(struct sched_entity *se, int interactive_phase)
 {
-        if (likely(se && se->cfs_rq))
-                se->cfs_rq->tg->interactive_phase = interactive_phase;
+	if (likely(se && se->cfs_rq))
+		se->cfs_rq->tg->interactive_phase = interactive_phase;
 }
 EXPORT_SYMBOL_GPL(set_interactive_phase);
 
-unsigned int __read_mostly sysctl_kvm_vamp         = 0;
+unsigned int __read_mostly sysctl_kvm_vamp	 = 0;
 EXPORT_SYMBOL_GPL(sysctl_kvm_vamp);
 
 int update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
 {  
-        if (sysctl_kvm_vamp) {
-                /* set_user_nice changes weight based on a type, 
-                 * and enq/deq for queued one */
-                if (new_flags & VF_BACKGROUND)
-                        set_user_nice(p, bg_nice);
-                else
-                        set_user_nice(p, 0);
-        }
-        /* update se's vcpu_flags with new_flags, while retaining on_rq status */
-        p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
-        return 1;
+	if (sysctl_kvm_vamp) {
+		/* set_user_nice changes weight based on a type, 
+		 * and enq/deq for queued one */
+		if (new_flags & VF_BACKGROUND)
+			set_user_nice(p, bg_nice);
+		else
+			set_user_nice(p, 0);
+	}
+	/* update se's vcpu_flags with new_flags, while retaining on_rq status */
+	p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
+	return 1;
 
 }
 EXPORT_SYMBOL_GPL(update_vcpu_flags);

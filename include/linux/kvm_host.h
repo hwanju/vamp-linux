@@ -159,33 +159,36 @@ struct kvm_vcpu {
 #endif
 
 #ifdef CONFIG_KVM_VDI
-        int track_cr3_on_ept;
-        /* caching the currently running guest task */
-        struct guest_task_struct *cur_guest_task;
+	int track_cr3_on_ept;
+	/* caching the currently running guest task */
+	struct guest_task_struct *cur_guest_task;
 #ifdef CONFIG_PREEMPT_NOTIFIERS
-        /* always called on vcpu preemption for accounting */
+	/* always called on vcpu preemption for accounting */
 	struct preempt_notifier acct_preempt_notifier;
 #endif
-        u64 last_depart;        /* last vcpu depart time */
-        u64 last_arrival;       /* last vcpu arrival time */
-        u64 load_epoch_id;      /* inidicating the current load_epoch_id */
+	u64 last_depart;	/* last vcpu depart time */
+	u64 last_arrival;       /* last vcpu arrival time */
+	u64 load_epoch_id;      /* inidicating the current load_epoch_id */
 
-        /* preserving the past cpu loads as well as the current one
-           indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
-        u64 cpu_loads[NR_LOAD_ENTRIES];
-        u64 exec_time;          /* accumulated execution time within load_monitor_window */
-        u64 bg_exec_time;       /* accumulated execution time bg tasks are running */
+	/* preserving the past cpu loads as well as the current one
+	   indexed by (load_epoch_id % NR_CPU_LOAD_ENTRIES) */
+	u64 cpu_loads[NR_LOAD_ENTRIES];
+	/* accumulated execution time within load_monitor_window */
+	u64 exec_time;
+       /* accumulated execution time bg tasks are running */
+	u64 bg_exec_time;
 
-        /* vcpu stat */
-        volatile long state;
+	/* vcpu stat */
+	volatile long state;
 	unsigned int flags;
 
-        /* time spent waiting on a runqueue */
+	/* time spent waiting on a runqueue */
 	unsigned long long pre_monitor_run_delay, prev_run_delay, run_delay;
 
-        unsigned int cur_load_avg;
-        unsigned long long cur_run_delay;
-        unsigned int reactive_gthread_load;             /* accumulated load of increased guest threads */
+	unsigned int cur_load_avg;
+	unsigned long long cur_run_delay;
+	/* accumulated load of increased guest threads */
+	unsigned int reactive_gthread_load;
 #endif
 
 	struct kvm_vcpu_arch arch;
@@ -315,21 +318,21 @@ struct kvm {
 #endif
 	long tlbs_dirty;
 #ifdef CONFIG_KVM_VDI
-        /* For task-aware agent */ 
+	/* For task-aware agent */ 
 #define GUEST_TASK_HASH_SHIFT   10
 #define GUEST_TASK_HASH_HEADS   (1 << GUEST_TASK_HASH_SHIFT)
-        struct hlist_head guest_task_hash[GUEST_TASK_HASH_HEADS];
-        spinlock_t guest_task_lock;
-        struct timer_list load_timer;
-        u64 monitor_timestamp;
-        u64 user_input_timestamp;
-        /* aggregate vcpu load during pre-monitoring period */
-        unsigned int pre_monitor_load;
-        int interactive_phase;  /* 0: normal phase, 
-                                 * NON_MIXED_INTERACTIVE_PHASE: fast path, 
-                                 * MIXED_INTERACTIVE_PHASE: slow path */
-        unsigned long system_task_id;
-        pid_t vm_id;    /* for tracing (non-mandatory) */
+	struct hlist_head guest_task_hash[GUEST_TASK_HASH_HEADS];
+	spinlock_t guest_task_lock;
+	struct timer_list load_timer;
+	u64 monitor_timestamp;
+	u64 user_input_timestamp;
+	/* aggregate vcpu load during pre-monitoring period */
+	unsigned int pre_monitor_load;
+	int interactive_phase;  /* 0: normal phase, 
+				 * NON_MIXED_INTERACTIVE_PHASE: fast path, 
+				 * MIXED_INTERACTIVE_PHASE: slow path */
+	unsigned long system_task_id;
+	pid_t vm_id;    /* for tracing (non-mandatory) */
 #endif
 };
 

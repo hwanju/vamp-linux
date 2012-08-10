@@ -488,7 +488,7 @@ static struct kvm *kvm_create_vm(void)
 	if (r)
 		goto out_err;
 #ifdef CONFIG_KVM_VDI
-        init_kvm_load_monitor(kvm);
+	init_kvm_load_monitor(kvm);
 #endif
 
 	raw_spin_lock(&kvm_lock);
@@ -579,7 +579,7 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	kvm_arch_flush_shadow(kvm);
 #endif
 #ifdef CONFIG_KVM_VDI
-        exit_kvm_load_monitor(kvm);
+	exit_kvm_load_monitor(kvm);
 #endif
 	kvm_arch_destroy_vm(kvm);
 	kvm_free_physmem(kvm);
@@ -1626,8 +1626,8 @@ static int kvm_vm_ioctl_create_vcpu(struct kvm *kvm, u32 id)
 
 	preempt_notifier_init(&vcpu->preempt_notifier, &kvm_preempt_ops);
 #ifdef CONFIG_KVM_VDI
-        init_task_aware_vcpu(vcpu);
-        current->se.is_vcpu = NEW_VCPU_SE;
+	init_task_aware_vcpu(vcpu);
+	current->se.is_vcpu = NEW_VCPU_SE;
 #endif
 
 	r = kvm_arch_vcpu_setup(vcpu);
@@ -1984,10 +1984,10 @@ static long kvm_vm_ioctl(struct file *filp,
 		break;
 #endif
 #ifdef CONFIG_KVM_VDI
-        case KVM_UI_INFO:
-                r = -EFAULT;
-                r = kvm_ui_event(kvm, arg);
-                break;
+	case KVM_UI_INFO:
+		r = -EFAULT;
+		r = kvm_ui_event(kvm, arg);
+		break;
 #endif
 	default:
 		r = kvm_arch_vm_ioctl(filp, ioctl, arg);
@@ -2611,10 +2611,10 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 
 	kvm_init_debug();
 #ifdef CONFIG_KVM_VDI
-        /* Though initialization failed, kvm_init() goes on with error message,
-         * since task-aware feature is best-effort */
-        if( init_task_aware_agent() != 0 ) 
-                printk(KERN_ERR "kvm: task-aware agent init failed\n");
+	/* Though initialization failed, kvm_init() goes on with error message,
+	 * since task-aware feature is best-effort */
+	if( init_task_aware_agent() != 0 ) 
+		printk(KERN_ERR "kvm: task-aware agent init failed\n");
 #endif
 
 	return 0;
@@ -2660,7 +2660,7 @@ void kvm_exit(void)
 	__free_page(hwpoison_page);
 	__free_page(bad_page);
 #ifdef CONFIG_KVM_VDI
-        destroy_task_aware_agent();
+	destroy_task_aware_agent();
 #endif
 }
 EXPORT_SYMBOL_GPL(kvm_exit);
