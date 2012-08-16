@@ -461,6 +461,10 @@ void proc_sched_show_task(struct task_struct *p, struct seq_file *m)
 	P(se.statistics.nr_wakeups_affine_attempts);
 	P(se.statistics.nr_wakeups_passive);
 	P(se.statistics.nr_wakeups_idle);
+#ifdef CONFIG_KVM_VDI
+	P(se.statistics.nr_vcpu_task_switch);
+	P(se.statistics.nr_vcpu_bg2fg_switch);
+#endif
 
 	{
 		u64 avg_atom, avg_per_cpu;

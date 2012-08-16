@@ -143,7 +143,7 @@ static inline void free_guest_task(struct guest_task_struct *guest_task)
  * Find guest task by id,
  * and should be called with holding guest_task_lock.
  */
-static inline struct guest_task_struct *__find_guest_task(struct kvm *kvm, 
+static struct guest_task_struct *__find_guest_task(struct kvm *kvm, 
 						unsigned long guest_task_id)
 {
 	struct guest_task_struct *iter_gtask, *guest_task = NULL;
@@ -184,7 +184,7 @@ static inline void __insert_to_guest_task_hash(struct kvm *kvm,
  * This find & alloc is atomically done with the proctection of guest_task_lock.
  * The reason alloc function is protected is a task can have multiple threads.
  */
-static inline struct guest_task_struct *find_and_alloc_guest_task(
+static struct guest_task_struct *find_and_alloc_guest_task(
 				struct kvm *kvm, unsigned long guest_task_id) 
 {
 	struct guest_task_struct *guest_task;
@@ -250,7 +250,7 @@ void check_on_hlt(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(check_on_hlt);
 
-static inline void init_load_monitor(void)
+static void init_load_monitor(void)
 {
 	int i;
 	
@@ -267,7 +267,7 @@ static inline void init_load_monitor(void)
 #define for_each_load_entry(i, _start_load_idx, _end_load_idx)      \
 	for (i = _start_load_idx; i != _end_load_idx; i = load_idx(i + 1))
 //#define get_ewma(_prev, _cur, _w)	((((_prev) * (10 - (_w)) + (_cur) * _w) + 5) / 10)
-static inline unsigned int get_vcpu_load_avg(struct kvm_vcpu *vcpu, 
+static unsigned int get_vcpu_load_avg(struct kvm_vcpu *vcpu, 
 		unsigned int start_load_idx, unsigned int end_load_idx, 
 		unsigned long long start_timestamp, int pre_monitor_period)
 {
@@ -329,7 +329,7 @@ static inline unsigned long long get_potential_vcpu_load(
 			(now - vcpu->kvm->monitor_timestamp);
 }
 
-static inline unsigned int get_gthread_load_avg(struct kvm_vcpu *vcpu, 
+static unsigned int get_gthread_load_avg(struct kvm_vcpu *vcpu, 
 			struct guest_task_struct *guest_task, 
 			unsigned int start_load_idx, unsigned int end_load_idx,
 			unsigned long long start_timestamp)
@@ -399,6 +399,19 @@ module_param(load_prof_enabled, int, 0644);
 static unsigned int load_prof_period_msec = DEFAULT_LOAD_PROF_PERIOD_MSEC;
 module_param(load_prof_period_msec, uint, 0644);
 
+/* main wrapper for adjusting vcpu's shares */
+static void update_vcpu_shares(struct kvm_vcpu *vcpu, 
+					struct task_struct *task)
+{
+	int bg_nice = get_bg_vcpu_nice(vcpu);
+
+	if (unlikely(!vcpu->cur_guest_task))
+		return;
+	if (vcpu->cur_guest_task->flags & VF_BACKGROUND)
+		trace_kvm_bg_vcpu(vcpu, bg_nice);
+	adjust_vcpu_shares(task, vcpu->cur_guest_task->flags, bg_nice);
+}
+
 /* 
  * calculate cpu loads during pre-monitoring period 
  * that is prior to a user event.
@@ -441,11 +454,9 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 	}
 	/* after scanning vcpu loads, make a decision 
 	 * whether tasks are mixed (slow) or not (fast) */
-	if (kvm->pre_monitor_load > bg_load_thresh_pct)
-		/* slow path */
+	if (kvm->pre_monitor_load > bg_load_thresh_pct)	/* slow path */
 		kvm->interactive_phase = MIXED_INTERACTIVE_PHASE;
-	else
-		/* fast path */
+	else	/* fast path */
 		kvm->interactive_phase = NON_MIXED_INTERACTIVE_PHASE;
 
 	/* scan gtask loads for pre-monitoring period */
@@ -506,18 +517,26 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 	spin_unlock(&kvm->guest_task_lock);
 
 	/* connect to scheduler core for notification of interactive phase */
-#if 0
-	rcu_read_lock();
-	pid = rcu_dereference(kvm->vcpus[0]->pid);
-	if (pid)
-		task = get_pid_task(kvm->vcpus[0]->pid, PIDTYPE_PID);
-	rcu_read_unlock();
-	if (task) {
-		set_interactive_phase(&task->se, kvm->interactive_phase);
-		put_task_struct(task);
-	}
-#endif
 	set_interactive_phase(&current->se, kvm->interactive_phase);
+
+	/* promptly adjust vCPU shares if mixed workloads */
+	if (kvm->interactive_phase == MIXED_INTERACTIVE_PHASE) {
+		kvm_for_each_vcpu(vidx, vcpu, kvm) {
+			struct task_struct *task = NULL;
+			struct pid *pid;
+
+			rcu_read_lock();
+			pid = rcu_dereference(vcpu->pid);
+			if (pid)
+				task = get_pid_task(vcpu->pid, PIDTYPE_PID);
+			rcu_read_unlock();
+			if (!task || !vcpu->cur_guest_task)
+				continue;
+
+			update_vcpu_shares(vcpu, task);
+			put_task_struct(task);
+		}
+	}
 	trace_kvm_load_info(kvm, vm_load, kvm->pre_monitor_load, 0);
 }
 
@@ -675,12 +694,10 @@ finish_interactive_phase:
 	}
 }
 
-static inline void guest_thread_arrive(struct kvm_vcpu *vcpu, 
+static void guest_thread_arrive(struct kvm_vcpu *vcpu, 
 				struct guest_thread_info *guest_thread, 
 				unsigned long long now)
 {
-	int bg_nice = get_bg_vcpu_nice(vcpu);
-
 	guest_thread->cpu = vcpu->cpu;
 	guest_thread->last_arrival = now;
 	check_load_epoch(vcpu, guest_thread, now);
@@ -689,10 +706,6 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu,
 		vcpu->cur_guest_task->flags = 0;
 		vcpu->exec_time = vcpu->bg_exec_time = 0;
 	}
-
-	if (vcpu->cur_guest_task->flags & VF_BACKGROUND) 
-		trace_kvm_bg_vcpu(vcpu, bg_nice);
-
 	trace_kvm_gthread_switch_arrive(get_cur_guest_task_id(vcpu), 
 			vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
 			guest_thread->cpu_loads[
@@ -701,12 +714,10 @@ static inline void guest_thread_arrive(struct kvm_vcpu *vcpu,
 	set_guest_thread_state(guest_thread, GUEST_THREAD_RUNNING);
 
 	/* vcpu shadows the type of the currently running guest task */
-	if (update_vcpu_flags(current, vcpu->cur_guest_task->flags, bg_nice)) 
-		/* copy gtask flags to vcpu flags */
-		vcpu->flags = vcpu->cur_guest_task->flags;      
+	update_vcpu_shares(vcpu, current);
 }
 
-static inline void guest_thread_depart(struct kvm_vcpu *vcpu, 
+static void guest_thread_depart(struct kvm_vcpu *vcpu, 
 		struct guest_thread_info *guest_thread, unsigned long long now)
 {
 	long long exec_time;
@@ -748,6 +759,12 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
 		/* accounting for departing */
 		prev = &vcpu->cur_guest_task->threads[vcpu->vcpu_id];
 		guest_thread_depart(vcpu, prev, now);
+
+		/* check if bg->fg scheduling */
+		if (vcpu->cur_guest_task->flags & VF_BACKGROUND &&
+		    !(guest_task->flags & VF_BACKGROUND))
+			current->se.statistics.nr_vcpu_bg2fg_switch++;
+		current->se.statistics.nr_vcpu_task_switch++;
 	}
 	/* caching next guest thread as the current one */
 	vcpu->cur_guest_task = guest_task;

@@ -2051,7 +2051,8 @@ EXPORT_SYMBOL_GPL(set_interactive_phase);
 unsigned int __read_mostly sysctl_kvm_vamp	 = 0;
 EXPORT_SYMBOL_GPL(sysctl_kvm_vamp);
 
-int update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice)
+void adjust_vcpu_shares(struct task_struct *p, 
+		unsigned int new_flags, int bg_nice)
 {  
 	if (sysctl_kvm_vamp) {
 		/* set_user_nice changes weight based on a type, 
@@ -2061,12 +2062,10 @@ int update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice
 		else
 			set_user_nice(p, 0);
 	}
-	/* update se's vcpu_flags with new_flags, while retaining on_rq status */
+	/* update se's vcpu_flags with new_flags while retaining on_rq status */
 	p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
-	return 1;
-
 }
-EXPORT_SYMBOL_GPL(update_vcpu_flags);
+EXPORT_SYMBOL_GPL(adjust_vcpu_shares);
 #endif
 
 #include "sched_idletask.c"

@@ -316,7 +316,6 @@ TRACE_EVENT(kvm_vcpu_switch,
 		__field(	int,	        vcpu_id		)
 		__field(	u64,		schedstat       )
 		__field(	int,	        state           )
-		__field(	unsigned int,   flags           )
 	),
 
 	TP_fast_assign(
@@ -324,11 +323,11 @@ TRACE_EVENT(kvm_vcpu_switch,
 		__entry->vcpu_id        = vcpu->vcpu_id;
 		__entry->schedstat      = schedstat;
 		__entry->state          = vcpu->state;
-		__entry->flags          = vcpu->flags;
 	),
 
-	TP_printk("%s v%d %s=%llu state=%d flags=%u", __entry->op ? "arrive" : "depart", __entry->vcpu_id,
-                __entry->op ? "run_delay" : "exec_time", __entry->schedstat, __entry->state, __entry->flags)
+	TP_printk("%s v%d %s=%llu state=%d", __entry->op ? "arrive" : "depart", 
+		__entry->vcpu_id, __entry->op ? "run_delay" : "exec_time", 
+		__entry->schedstat, __entry->state)
 );
 #define trace_kvm_vcpu_switch_arrive(vcpu, schedstat) \
         trace_kvm_vcpu_switch(1, vcpu, schedstat)
@@ -425,18 +424,16 @@ TRACE_EVENT(kvm_vcpu_stat,
 		__field(	int,            vm_id                   )
 		__field(	int,            vcpu_id                 )
 		__field(	u64,	        run_delay               )
-		__field(	unsigned int,   flags                   )
 	),
 
 	TP_fast_assign(
                 __entry->vm_id                  = vm_id;
                 __entry->vcpu_id                = vcpu->vcpu_id;
 		__entry->run_delay              = run_delay;
-                __entry->flags                  = vcpu->flags;
 	),
 
-	TP_printk("vm%d v%d run_delay=%llu flags=%u", 
-                        __entry->vm_id, __entry->vcpu_id, __entry->run_delay, __entry->flags)
+	TP_printk("vm%d v%d run_delay=%llu", 
+                        __entry->vm_id, __entry->vcpu_id, __entry->run_delay)
 );
 
 TRACE_EVENT(kvm_vcpu_load,

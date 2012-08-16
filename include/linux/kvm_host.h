@@ -180,7 +180,6 @@ struct kvm_vcpu {
 
 	/* vcpu stat */
 	volatile long state;
-	unsigned int flags;
 
 	/* time spent waiting on a runqueue */
 	unsigned long long pre_monitor_run_delay, prev_run_delay, run_delay;

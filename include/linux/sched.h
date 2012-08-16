@@ -1163,6 +1163,11 @@ struct sched_statistics {
 	u64			nr_wakeups_affine_attempts;
 	u64			nr_wakeups_passive;
 	u64			nr_wakeups_idle;
+
+#ifdef CONFIG_KVM_VDI
+	u64			nr_vcpu_task_switch;
+	u64			nr_vcpu_bg2fg_switch;
+#endif
 };
 #endif
 
@@ -2716,11 +2721,13 @@ extern void set_interactive_phase(struct sched_entity *se, int interactive_phase
 /* VCPU flags */
 #define VF_SHIFT                16
 #define VF_MASK                 ((1 << VF_SHIFT) - 1)
+/* FIXME-vamp: VF_INTERACTIVE and _ON_RQ will be deprecated */
 #define VF_INTERACTIVE          0x00000001                      /* I have interactive workloads */
 #define VF_BACKGROUND           0x00000002                      /* I have background workloads */
 #define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
 #define VF_BACKGROUND_ON_RQ     (VF_BACKGROUND  << VF_SHIFT)    /* I'm on runq as an background vcpu (only for se's vcpu_flags) */
-extern int update_vcpu_flags(struct task_struct *p, unsigned int new_flags, int bg_nice);
+extern void adjust_vcpu_shares(struct task_struct *p, 
+		unsigned int new_flags, int bg_nice);
 extern int get_interactive_count(int cpu);
 #endif
 
