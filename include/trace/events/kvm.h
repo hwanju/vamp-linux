@@ -335,8 +335,8 @@ TRACE_EVENT(kvm_vcpu_switch,
         trace_kvm_vcpu_switch(0, vcpu, schedstat)
 
 TRACE_EVENT(kvm_gthread_switch,
-	TP_PROTO(int op, unsigned long guest_task_id, int vcpu_id, unsigned int load_idx, u64 cpu_load, unsigned int flags),
-	TP_ARGS(op, guest_task_id, vcpu_id, load_idx, cpu_load, flags),
+	TP_PROTO(int op, unsigned long guest_task_id, int vcpu_id, unsigned int load_idx, u64 cpu_load, unsigned int flags, int para_id, char *task_name, unsigned long as_root),
+	TP_ARGS(op, guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root),
 
 	TP_STRUCT__entry(
 		__field(	int,		op              )
@@ -345,6 +345,9 @@ TRACE_EVENT(kvm_gthread_switch,
 		__field(	unsigned int,   load_idx        )
 		__field(	u64,		cpu_load        )
 		__field(	unsigned int,   flags           )
+		__field(	int,	        para_id		)
+		__array(	char,	comm,	16		)
+		__field(	unsigned long,	as_root		)
 	),
 
 	TP_fast_assign(
@@ -354,15 +357,20 @@ TRACE_EVENT(kvm_gthread_switch,
 		__entry->load_idx       = load_idx;
 		__entry->cpu_load       = cpu_load;
 		__entry->flags          = flags;
+		__entry->para_id	= para_id;
+		memcpy(__entry->comm, task_name, TASK_COMM_LEN);
+		__entry->as_root	= as_root;
 	),
 
-	TP_printk("%s gtid=%05lx v%d load_idx=%u cpu_load=%llu flags=%u", __entry->op ? "arrive" : "depart", 
-                  __entry->guest_task_id, __entry->vcpu_id, __entry->load_idx, __entry->cpu_load, __entry->flags)
+	TP_printk("%s gtid=%05lx v%d load_idx=%u cpu_load=%llu flags=%u para_id=%d name=%s as_root=%05lx", 
+			__entry->op ? "arrive" : "depart", 
+			__entry->guest_task_id, __entry->vcpu_id, __entry->load_idx, __entry->cpu_load, 
+			__entry->flags, __entry->para_id, __entry->comm, __entry->as_root)
 );
-#define trace_kvm_gthread_switch_arrive(guest_task_id, vcpu_id, load_idx, cpu_load, flags) \
-        trace_kvm_gthread_switch(1, guest_task_id, vcpu_id, load_idx, cpu_load, flags)
-#define trace_kvm_gthread_switch_depart(guest_task_id, vcpu_id, load_idx, cpu_load, flags) \
-        trace_kvm_gthread_switch(0, guest_task_id, vcpu_id, load_idx, cpu_load, flags)
+#define trace_kvm_gthread_switch_arrive(guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root) \
+        trace_kvm_gthread_switch(1, guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root)
+#define trace_kvm_gthread_switch_depart(guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root) \
+        trace_kvm_gthread_switch(0, guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root)
 
 TRACE_EVENT(kvm_ui,
 	TP_PROTO(struct kvm *kvm, int event_type, int event_info, unsigned int load_idx),
@@ -558,24 +566,6 @@ TRACE_EVENT(kvm_bg_vcpu,
                 __entry->bg_exec_time, __entry->exec_time, __entry->bg_vcpu_nice)
 );
 
-TRACE_EVENT(kvm_urgent_vcpu_info,
-        TP_PROTO(int vcpu_id, unsigned long urgent_vcpu_mask),
-        
-        TP_ARGS(vcpu_id, urgent_vcpu_mask),
-        
-        TP_STRUCT__entry(
-                __field( int,           vcpu_id         )
-                __field( unsigned long, urgent_vcpu_mask)
-        ),
-        
-        TP_fast_assign(
-                __entry->vcpu_id                = vcpu_id;
-                __entry->urgent_vcpu_mask       = urgent_vcpu_mask;
-        ),
-        
-        TP_printk("vcpu_id=%d urgent_vcpu_mask=%lx", __entry->vcpu_id, __entry->urgent_vcpu_mask)
-);
-
 TRACE_EVENT(kvm_system_task,
         TP_PROTO(int vcpu_id, unsigned long system_task_id, unsigned long cur_task_id),
 
@@ -596,27 +586,25 @@ TRACE_EVENT(kvm_system_task,
         TP_printk("vcpu_id=%d system_task_id=%lu cur_task_id=%lu",
                 __entry->vcpu_id, __entry->system_task_id, __entry->cur_task_id)
 );
-TRACE_EVENT(kvm_ipi_delivery,
-        TP_PROTO(u32 vector, int src_vcpu_id, int dst_vcpu_id),
+TRACE_EVENT(kvm_ipi,
+	TP_PROTO(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *dst_vcpu, struct kvm_lapic_irq *irq),
+	TP_ARGS(src_vcpu, dst_vcpu, irq),
 
-        TP_ARGS(vector, src_vcpu_id, dst_vcpu_id),
+	TP_STRUCT__entry(
+		__field(        int,            src_vcpu_id     )
+		__field(        int,            dst_vcpu_id     )
+		__field(        u32,            vector          )
+	),              
 
-        TP_STRUCT__entry(
-                __field( u32,   vector)
-                __field( int,   src_vcpu_id)
-                __field( int,   dst_vcpu_id)
-        ),
+	TP_fast_assign(
+		__entry->src_vcpu_id    = src_vcpu->vcpu_id;
+		__entry->dst_vcpu_id    = dst_vcpu->vcpu_id;
+		__entry->vector         = irq->vector;
+	),              
 
-        TP_fast_assign(
-                __entry->vector = vector;
-                __entry->src_vcpu_id    = src_vcpu_id;
-                __entry->dst_vcpu_id    = dst_vcpu_id;
-        ),
-
-        TP_printk("vector=%x src_vcpu_id=%d dst_vcpu_id=%d",
-                        __entry->vector, __entry->src_vcpu_id, __entry->dst_vcpu_id)
-
-);
+	TP_printk("src_vcpu_id=%d dst_vcpu_id=%d vector=%u\n",
+			__entry->src_vcpu_id, __entry->dst_vcpu_id, __entry->vector)
+);  
 #endif /* CONFIG_KVM_VDI */
 #endif /* _TRACE_KVM_MAIN_H */
 

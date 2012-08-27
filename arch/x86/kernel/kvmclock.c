@@ -160,6 +160,9 @@ static void __cpuinit kvm_setup_secondary_clock(void)
 static void kvm_crash_shutdown(struct pt_regs *regs)
 {
 	native_write_msr(msr_kvm_system_time, 0, 0);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+        kvm_disable_guest_task();
+#endif
 	native_machine_crash_shutdown(regs);
 }
 #endif
@@ -167,6 +170,9 @@ static void kvm_crash_shutdown(struct pt_regs *regs)
 static void kvm_shutdown(void)
 {
 	native_write_msr(msr_kvm_system_time, 0, 0);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+        kvm_disable_guest_task();
+#endif
 	native_machine_shutdown();
 }
 

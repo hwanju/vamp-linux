@@ -1427,6 +1427,28 @@ int kvm_write_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 }
 EXPORT_SYMBOL_GPL(kvm_write_guest_cached);
 
+#ifdef CONFIG_KVM_VDI	/* backport from 3.2.0 for paravirt */
+int kvm_read_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
+		void *data, unsigned long len)
+{                       
+	struct kvm_memslots *slots = kvm_memslots(kvm);
+	int r;          
+
+	if (slots->generation != ghc->generation)
+		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa);
+
+	if (kvm_is_error_hva(ghc->hva))
+		return -EFAULT;
+
+	r = __copy_from_user(data, (void __user *)ghc->hva, len);
+	if (r)                  
+		return -EFAULT; 
+
+	return 0;               
+}
+EXPORT_SYMBOL_GPL(kvm_read_guest_cached);
+#endif
+
 int kvm_clear_guest_page(struct kvm *kvm, gfn_t gfn, int offset, int len)
 {
 	return kvm_write_guest_page(kvm, gfn, (const void *) empty_zero_page,

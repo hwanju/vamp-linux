@@ -58,6 +58,11 @@ struct kvm_para_state {
 
 static DEFINE_PER_CPU(struct kvm_para_state, para_state);
 static DEFINE_PER_CPU(struct kvm_vcpu_pv_apf_data, apf_reason) __aligned(64);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+DEFINE_PER_CPU(struct kvm_guest_task, guest_task) __aligned(64);
+EXPORT_PER_CPU_SYMBOL_GPL(guest_task);
+static int has_guest_task_classifier = 0;
+#endif
 
 static struct kvm_para_state *kvm_para_state(void)
 {
@@ -441,6 +446,29 @@ static void __init paravirt_ops_setup(void)
 #endif
 }
 
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+static void kvm_register_guest_task(void)
+{
+        int cpu = smp_processor_id();
+	struct kvm_guest_task *gt = &per_cpu(guest_task, cpu);
+
+        if (!has_guest_task_classifier)
+                return;
+
+	//memset(gt, 0, sizeof(*gt));
+
+	wrmsrl(MSR_KVM_GUEST_TASK, (__pa(gt) | KVM_MSR_ENABLED));
+	printk(KERN_INFO "kvm-gtask: cpu %d, msr %lx\n", cpu, __pa(gt));
+}
+void kvm_disable_guest_task(void)
+{
+	if (!has_guest_task_classifier)
+		return;
+
+	wrmsr(MSR_KVM_GUEST_TASK, 0, 0);
+}
+#endif
+
 void __cpuinit kvm_guest_cpu_init(void)
 {
 	if (!kvm_para_available())
@@ -457,6 +485,10 @@ void __cpuinit kvm_guest_cpu_init(void)
 		printk(KERN_INFO"KVM setup async PF for cpu %d\n",
 		       smp_processor_id());
 	}
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+        if (has_guest_task_classifier)
+                kvm_register_guest_task();
+#endif
 }
 
 static void kvm_pv_disable_apf(void *unused)
@@ -502,6 +534,9 @@ static void kvm_guest_cpu_offline(void *dummy)
 {
 	kvm_pv_disable_apf(NULL);
 	apf_task_wake_all();
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+        kvm_disable_guest_task();
+#endif
 }
 
 static int __cpuinit kvm_cpu_notify(struct notifier_block *self,
@@ -548,6 +583,10 @@ void __init kvm_guest_init(void)
 	if (kvm_para_has_feature(KVM_FEATURE_ASYNC_PF))
 		x86_init.irqs.trap_init = kvm_apf_trap_init;
 
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	if (kvm_para_has_feature(KVM_FEATURE_GUEST_TASK))
+		has_guest_task_classifier = 1;
+#endif
 #ifdef CONFIG_SMP
 	smp_ops.smp_prepare_boot_cpu = kvm_smp_prepare_boot_cpu;
 	register_cpu_notifier(&kvm_cpu_notifier);

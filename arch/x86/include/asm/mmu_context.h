@@ -6,6 +6,10 @@
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/paravirt.h>
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+#include <linux/kvm_para.h>
+#endif
+
 #ifndef CONFIG_PARAVIRT
 #include <asm-generic/mm_hooks.h>
 
@@ -42,6 +46,11 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 #endif
 		cpumask_set_cpu(cpu, mm_cpumask(next));
 
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+		kvm_para_set_task(tsk ? tsk->tgid : -1, 
+				tsk ? tsk->comm : "Null", 
+				__pa(next->pgd));
+#endif
 		/* Re-load page tables */
 		load_cr3(next->pgd);
 

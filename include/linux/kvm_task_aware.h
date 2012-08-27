@@ -58,7 +58,8 @@ struct guest_thread_info {
 
 struct guest_task_struct {
 	struct hlist_node link;
-	unsigned long id;
+	unsigned long id;	/* host-side id (i.e. cr3) */
+	int para_id;		/* guest-side id (i.e. tgid) by paravirt */
 	/* aggregate guest thread load (in pct) 
 	 * during pre-monitoring period */
 	unsigned int pre_monitor_load;

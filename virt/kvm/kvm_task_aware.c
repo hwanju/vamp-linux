@@ -7,6 +7,9 @@
 #include <linux/timer.h>
 #include <linux/sched.h>
 
+char *kvm_get_guest_task(struct kvm_vcpu *vcpu, int *task_id,
+		unsigned long *as_root);
+
 #define set_guest_thread_state(guest_thread, state_value)     \
 	set_mb(guest_thread->state, (state_value))
 
@@ -698,10 +701,15 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 				struct guest_thread_info *guest_thread, 
 				unsigned long long now)
 {
-	guest_thread->cpu = vcpu->cpu;
+	int para_id = 0;
+	unsigned long as_root;
+	char *gtask_name =
+		kvm_get_guest_task(vcpu, &para_id, &as_root);
+	guest_thread->cpu = vcpu->cpu;	/* FIXME: deprecated */
 	guest_thread->last_arrival = now;
 	check_load_epoch(vcpu, guest_thread, now);
 
+	vcpu->cur_guest_task->para_id = para_id;
 	if (vcpu->kvm->interactive_phase == NORMAL_PHASE) {
 		vcpu->cur_guest_task->flags = 0;
 		vcpu->exec_time = vcpu->bg_exec_time = 0;
@@ -710,7 +718,8 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 			vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
 			guest_thread->cpu_loads[
 				load_idx(guest_thread->load_epoch_id)],
-			vcpu->cur_guest_task->flags);
+			vcpu->cur_guest_task->flags,
+			para_id, gtask_name, as_root);
 	set_guest_thread_state(guest_thread, GUEST_THREAD_RUNNING);
 
 	/* vcpu shadows the type of the currently running guest task */
@@ -730,7 +739,8 @@ static void guest_thread_depart(struct kvm_vcpu *vcpu,
 			vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
 			guest_thread->cpu_loads[
 				load_idx(guest_thread->load_epoch_id)],
-			vcpu->cur_guest_task->flags);
+			vcpu->cur_guest_task->flags, 
+			0, 0, 0);
 	set_guest_thread_state(guest_thread, GUEST_THREAD_NOT_RUNNING);
 }
 

@@ -2729,7 +2729,7 @@ extern void set_interactive_phase(struct sched_entity *se, int interactive_phase
 extern void adjust_vcpu_shares(struct task_struct *p, 
 		unsigned int new_flags, int bg_nice);
 extern int get_interactive_count(int cpu);
-#endif
+#endif	/* CONFIG_KVM_VDI */
 
 #endif /* __KERNEL__ */
 

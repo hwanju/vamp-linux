@@ -1470,6 +1470,27 @@ static void kvmclock_reset(struct kvm_vcpu *vcpu)
 	}
 }
 
+#ifdef CONFIG_KVM_VDI
+char *kvm_get_guest_task(struct kvm_vcpu *vcpu, int *task_id, 
+		unsigned long *as_root)
+{
+	*task_id = 0;
+	if (!(vcpu->arch.gt.msr_val & KVM_MSR_ENABLED))
+		return NULL;
+
+	if (unlikely(kvm_read_guest_cached(vcpu->kvm, &vcpu->arch.gt.gtask_cache,
+					&vcpu->arch.gt.gtask, 
+					sizeof(struct kvm_guest_task))))
+		return NULL;
+
+	*task_id = vcpu->arch.gt.gtask.task_id;
+	*as_root = vcpu->arch.gt.gtask.as_root;
+
+	return vcpu->arch.gt.gtask.task_name;
+}
+EXPORT_SYMBOL_GPL(kvm_get_guest_task);
+#endif
+
 int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 {
 	switch (msr) {
@@ -1552,6 +1573,20 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 		if (kvm_pv_enable_async_pf(vcpu, data))
 			return 1;
 		break;
+#ifdef CONFIG_KVM_VDI
+	case MSR_KVM_GUEST_TASK:
+                /* share bitmask */
+		if (data & KVM_GTASK_RESERVED_MASK)
+			return 1;
+
+		if (kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.gt.gtask_cache,
+							data & KVM_GTASK_VALID_BITS))
+			return 1;
+
+		vcpu->arch.gt.msr_val = data;
+
+		break;
+#endif
 	case MSR_IA32_MCG_CTL:
 	case MSR_IA32_MCG_STATUS:
 	case MSR_IA32_MC0_CTL ... MSR_IA32_MC0_CTL + 4 * KVM_MAX_MCE_BANKS - 1:
@@ -1837,6 +1872,11 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata)
 	case MSR_KVM_ASYNC_PF_EN:
 		data = vcpu->arch.apf.msr_val;
 		break;
+#ifdef CONFIG_KVM_VDI
+	case MSR_KVM_GUEST_TASK:
+		data = vcpu->arch.gt.msr_val;
+		break;
+#endif
 	case MSR_IA32_P5_MC_ADDR:
 	case MSR_IA32_P5_MC_TYPE:
 	case MSR_IA32_MCG_CAP:
@@ -2440,6 +2480,9 @@ static void do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 			     (1 << KVM_FEATURE_NOP_IO_DELAY) |
 			     (1 << KVM_FEATURE_CLOCKSOURCE2) |
 			     (1 << KVM_FEATURE_ASYNC_PF) |
+#ifdef CONFIG_KVM_VDI
+			     (1 << KVM_FEATURE_GUEST_TASK) |
+#endif
 			     (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT);
 		entry->ebx = 0;
 		entry->ecx = 0;

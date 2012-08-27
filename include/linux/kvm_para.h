@@ -33,6 +33,16 @@ static inline int kvm_para_has_feature(unsigned int feature)
 		return 1;
 	return 0;
 }
+
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+DECLARE_PER_CPU(struct kvm_guest_task, guest_task);
+static inline void kvm_para_set_task(int tgid, char *comm, unsigned long pgd)
+{
+	__get_cpu_var(guest_task).task_id = tgid;
+	memcpy(&__get_cpu_var(guest_task).task_name, comm, 16);
+	__get_cpu_var(guest_task).as_root = pgd;
+}
+#endif
 #endif /* __KERNEL__ */
 #endif /* __LINUX_KVM_PARA_H */
 

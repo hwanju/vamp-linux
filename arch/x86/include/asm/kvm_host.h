@@ -393,6 +393,13 @@ struct kvm_vcpu_arch {
 	unsigned int hw_tsc_khz;
 	unsigned int time_offset;
 	struct page *time_page;
+#ifdef CONFIG_KVM_VDI
+        struct {
+                u64 msr_val;
+                struct gfn_to_hva_cache gtask_cache;
+                struct kvm_guest_task gtask;
+        } gt;
+#endif
 	u64 last_guest_tsc;
 	u64 last_kernel_ns;
 	u64 last_tsc_nsec;

@@ -97,6 +97,10 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			continue;
 
 		if (!kvm_is_dm_lowest_prio(irq)) {
+#ifdef CONFIG_KVM_VDI
+			if (irq->ipi)
+				trace_kvm_ipi(src->vcpu, vcpu, irq);
+#endif
 			if (r < 0)
 				r = 0;
 			r += kvm_apic_set_irq(vcpu, irq);
