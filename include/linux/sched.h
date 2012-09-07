@@ -1201,6 +1201,7 @@ struct sched_entity {
 #define NEW_VCPU_SE     2
         int is_vcpu;
         unsigned int vcpu_flags;
+	char boost_flag;
 #endif
 };
 
@@ -2011,6 +2012,8 @@ static inline unsigned int get_sysctl_timer_migration(void)
 #ifdef CONFIG_KVM_VDI
 /* parameters */
 extern unsigned int sysctl_kvm_vamp;
+extern unsigned int sysctl_kvm_partial_boost;
+extern unsigned int sysctl_sched_vm_preempt_mode;
 #endif
 extern unsigned int sysctl_sched_rt_period;
 extern int sysctl_sched_rt_runtime;
@@ -2729,6 +2732,8 @@ extern void set_interactive_phase(struct sched_entity *se, int interactive_phase
 extern void adjust_vcpu_shares(struct task_struct *p, 
 		unsigned int new_flags, int bg_nice);
 extern int get_interactive_count(int cpu);
+extern int request_boost(struct task_struct *p);
+extern void yield_from_boost(struct task_struct *p);
 #endif	/* CONFIG_KVM_VDI */
 
 #endif /* __KERNEL__ */

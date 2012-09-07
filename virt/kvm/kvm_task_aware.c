@@ -40,11 +40,27 @@ module_param(load_monitor_enabled, uint, S_IRUGO);
  *       larger than epoch period. So, cpu_loads that are not 
  *       checked in the past have to be initialized! (See inner do-while loop)
  */
-static inline void check_load_epoch(struct kvm_vcpu *vcpu, 
+//static inline void check_load_epoch(struct kvm_vcpu *vcpu, 
+void check_load_epoch(struct kvm_vcpu *vcpu, 
 				struct guest_thread_info *guest_thread, 
 				unsigned long long now)
 {
 	unsigned long long cur_load_epoch_id = load_epoch_id(now);
+
+	/* following is for the first time a vcpu or guest thread firstly
+	 * arrives, which means no departure (no accounting) hasn't happened.
+	 * at the first arrival, load_epoch_id must be zero, so the difference
+	 * from cur_load_epoch_id may be considerable. 
+	 * To avoid excessive loop, load_epoch_id is set close to current one*/
+	if (unlikely(cur_load_epoch_id - guest_thread->load_epoch_id >= 
+				NR_LOAD_ENTRIES))
+		guest_thread->load_epoch_id = 
+			cur_load_epoch_id - NR_LOAD_ENTRIES + 1;
+	if (unlikely(cur_load_epoch_id - vcpu->load_epoch_id >=
+				NR_LOAD_ENTRIES))
+		vcpu->load_epoch_id =
+			cur_load_epoch_id - NR_LOAD_ENTRIES + 1;
+
 	if (guest_thread->load_epoch_id < cur_load_epoch_id) {
 		do {
 			guest_thread->load_epoch_id++;
@@ -510,11 +526,8 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 				iter_gtask->flags |= VF_BACKGROUND;
 			
 			if (valid_load_task)
-				trace_kvm_gtask_stat(kvm->vm_id, 
-					kvm->interactive_phase, 
-					iter_gtask->id, 
-					iter_gtask->pre_monitor_load, 
-					iter_gtask->flags);
+				trace_kvm_gtask_stat(kvm, iter_gtask, 
+						iter_gtask->pre_monitor_load);
 		}
 	}
 	spin_unlock(&kvm->guest_task_lock);
@@ -661,11 +674,8 @@ static void load_timer_handler(unsigned long data)
 						iter_gtask->pre_monitor_load);
 			}
 			if (valid_load_task)
-				trace_kvm_gtask_stat(kvm->vm_id, 
-						kvm->interactive_phase, 
-						iter_gtask->id, 
-						eff_gtask_load, 
-						iter_gtask->flags);
+				trace_kvm_gtask_stat(kvm, iter_gtask, 
+							eff_gtask_load);
 		}
 	}
 	spin_unlock(&kvm->guest_task_lock);
@@ -701,25 +711,24 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 				struct guest_thread_info *guest_thread, 
 				unsigned long long now)
 {
-	int para_id = 0;
+	int para_id;
 	unsigned long as_root;
-	char *gtask_name =
-		kvm_get_guest_task(vcpu, &para_id, &as_root);
+
+	kvm_get_guest_task(vcpu, &para_id, &as_root);	/* for tracing */
+
 	guest_thread->cpu = vcpu->cpu;	/* FIXME: deprecated */
 	guest_thread->last_arrival = now;
 	check_load_epoch(vcpu, guest_thread, now);
 
-	vcpu->cur_guest_task->para_id = para_id;
 	if (vcpu->kvm->interactive_phase == NORMAL_PHASE) {
 		vcpu->cur_guest_task->flags = 0;
 		vcpu->exec_time = vcpu->bg_exec_time = 0;
 	}
-	trace_kvm_gthread_switch_arrive(get_cur_guest_task_id(vcpu), 
-			vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
+	trace_kvm_gthread_switch_arrive(vcpu, 
+			load_idx(guest_thread->load_epoch_id),
 			guest_thread->cpu_loads[
 				load_idx(guest_thread->load_epoch_id)],
-			vcpu->cur_guest_task->flags,
-			para_id, gtask_name, as_root);
+			0);
 	set_guest_thread_state(guest_thread, GUEST_THREAD_RUNNING);
 
 	/* vcpu shadows the type of the currently running guest task */
@@ -729,18 +738,17 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 static void guest_thread_depart(struct kvm_vcpu *vcpu, 
 		struct guest_thread_info *guest_thread, unsigned long long now)
 {
-	long long exec_time;
+	long long exec_time = 0;
 	if (likely(guest_thread->last_arrival)) {
 		exec_time = now - guest_thread->last_arrival;
 		account_cpu_load(vcpu, guest_thread, exec_time, now);
 	}
 	guest_thread->last_depart = now;
-	trace_kvm_gthread_switch_depart(get_cur_guest_task_id(vcpu), 
-			vcpu->vcpu_id, load_idx(guest_thread->load_epoch_id),
+	trace_kvm_gthread_switch_depart(vcpu, 
+			load_idx(guest_thread->load_epoch_id),
 			guest_thread->cpu_loads[
 				load_idx(guest_thread->load_epoch_id)],
-			vcpu->cur_guest_task->flags, 
-			0, 0, 0);
+			exec_time);
 	set_guest_thread_state(guest_thread, GUEST_THREAD_NOT_RUNNING);
 }
 
@@ -782,6 +790,11 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
 	/* accounting for arriving */ 
 	next = &guest_task->threads[vcpu->vcpu_id];
 	guest_thread_arrive(vcpu, next, now);
+
+	/* the reason yielding is carried out in track_guest_task() is
+	 * we don't count the first gtask arrival right after vcpu arrival */
+	if (vcpu->cur_guest_task->flags & VF_BACKGROUND)
+		yield_from_boost(current);
 }
 EXPORT_SYMBOL_GPL(track_guest_task);
 
@@ -809,7 +822,7 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 	cur_guest_thread = get_cur_guest_thread(vcpu);
 	if (unlikely(!cur_guest_thread))
 		return;
-	trace_kvm_vcpu_switch_arrive(vcpu, vcpu->run_delay);
+	trace_kvm_vcpu_switch_arrive(vcpu, current, vcpu->run_delay);
 	guest_thread_arrive(vcpu, cur_guest_thread, now);
 }
 
@@ -833,7 +846,7 @@ static void vcpu_depart(struct preempt_notifier *pn, struct task_struct *next)
 	if (unlikely(!cur_guest_thread))
 		return;
 	guest_thread_depart(vcpu, cur_guest_thread, now);
-	trace_kvm_vcpu_switch_depart(vcpu, now - vcpu->last_arrival);
+	trace_kvm_vcpu_switch_depart(vcpu, current, now - vcpu->last_arrival);
 
 	while (vcpu->exec_time > load_monitor_window) {
 		/* borrowed code from update_cfs_load */
@@ -918,6 +931,47 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now)
 	}
 }
 EXPORT_SYMBOL_GPL(start_load_monitor);
+
+void request_partial_boost(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu)
+{
+	struct task_struct *task = NULL;
+	struct pid *pid;
+
+	if (!sysctl_kvm_partial_boost ||
+	    vcpu->kvm->interactive_phase == NORMAL_PHASE)
+		return;
+
+	/* if source is NULL, unconditionally boosting */
+	if (src_vcpu && 
+	    (unlikely(!src_vcpu->cur_guest_task) ||
+	    (src_vcpu->cur_guest_task->flags & VF_BACKGROUND &&
+	    !current->se.boost_flag)))	/* return if bg && boost off */
+		return;
+
+	rcu_read_lock();
+	pid = rcu_dereference(vcpu->pid);
+	if (pid)
+		task = get_pid_task(vcpu->pid, PIDTYPE_PID);
+	rcu_read_unlock();
+
+	if (!task)
+		return;
+	request_boost(task);
+	put_task_struct(task);
+}
+
+void check_boost_event(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu,
+		struct kvm_lapic_irq *irq)
+{
+	if (irq->ipi) {
+		trace_kvm_ipi(src_vcpu, vcpu, irq);
+		if (irq->vector == RESCHEDULE_VECTOR)
+			request_partial_boost(src_vcpu, vcpu);
+	}
+	else if (irq->vector == 0x31) {
+		request_partial_boost(NULL, vcpu);
+	}
+}
 
 /*
  * Each VM maintains a hash table to store guest_task_struct 

@@ -42,6 +42,14 @@ static inline void kvm_para_set_task(int tgid, char *comm, unsigned long pgd)
 	memcpy(&__get_cpu_var(guest_task).task_name, comm, 16);
 	__get_cpu_var(guest_task).as_root = pgd;
 }
+static inline void kvm_para_set_debug1(u64 val)
+{
+	__get_cpu_var(guest_task).debug_val1 = val;
+}
+static inline void kvm_para_set_debug2(u64 val)
+{
+	__get_cpu_var(guest_task).debug_val2 = val;
+}
 #endif
 #endif /* __KERNEL__ */
 #endif /* __LINUX_KVM_PARA_H */

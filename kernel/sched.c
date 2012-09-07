@@ -122,6 +122,11 @@
  */
 #define RUNTIME_INF	((u64)~0ULL)
 
+#ifdef CONFIG_KVM_VDI
+#define BOOST_REQUESTED	1
+#define BOOST_DONE	2
+#endif
+
 static inline int rt_policy(int policy)
 {
 	if (unlikely(policy == SCHED_FIFO || policy == SCHED_RR))
@@ -334,6 +339,9 @@ struct cfs_rq {
 	struct list_head *balance_iterator;
 #ifdef CONFIG_KVM_VDI
 	unsigned long nr_running_bg_vcpus; 
+	/* boost buddy is used for partial boosting 
+	 * 4th buddy since last, next, skip */
+	struct sched_entity *boost;
 #endif
 
 	/*
@@ -2040,34 +2048,6 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
 
-#ifdef CONFIG_KVM_VDI
-void set_interactive_phase(struct sched_entity *se, int interactive_phase)
-{
-	if (likely(se && se->cfs_rq))
-		se->cfs_rq->tg->interactive_phase = interactive_phase;
-}
-EXPORT_SYMBOL_GPL(set_interactive_phase);
-
-unsigned int __read_mostly sysctl_kvm_vamp	 = 0;
-EXPORT_SYMBOL_GPL(sysctl_kvm_vamp);
-
-void adjust_vcpu_shares(struct task_struct *p, 
-		unsigned int new_flags, int bg_nice)
-{  
-	if (sysctl_kvm_vamp) {
-		/* set_user_nice changes weight based on a type, 
-		 * and enq/deq for queued one */
-		if (new_flags & VF_BACKGROUND)
-			set_user_nice(p, bg_nice);
-		else
-			set_user_nice(p, 0);
-	}
-	/* update se's vcpu_flags with new_flags while retaining on_rq status */
-	p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
-}
-EXPORT_SYMBOL_GPL(adjust_vcpu_shares);
-#endif
-
 #include "sched_idletask.c"
 #include "sched_fair.c"
 #include "sched_rt.c"
@@ -3200,6 +3180,10 @@ context_switch(struct rq *rq, struct task_struct *prev,
 		next->active_mm = oldmm;
 		atomic_inc(&oldmm->mm_count);
 		enter_lazy_tlb(oldmm, next);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+		/* to track kernel thread */
+		kvm_para_set_task(next->tgid, next->comm, __pa(oldmm->pgd));
+#endif
 	} else
 		switch_mm(oldmm, mm, next);
 
@@ -4954,6 +4938,14 @@ void set_user_nice(struct task_struct *p, long nice)
 
 	if (on_rq) {
 		enqueue_task(rq, p, 0);
+#ifdef CONFIG_KVM_VDI
+		/* in vamp, this function is called during the run of vcpu
+		 * whenever bg-to-fg or fg-to-bg switches. 
+		 * if sysctl_kvm_vamp is on, skip reschedule to reduce
+		 * excessive context switches */
+		if (sysctl_kvm_vamp)
+			goto out_unlock;
+#endif
 		/*
 		 * If the task increased its priority or is running and
 		 * lowered its priority, then reschedule its CPU:
@@ -9375,4 +9367,76 @@ struct cgroup_subsys cpuacct_subsys = {
 	.subsys_id = cpuacct_subsys_id,
 };
 #endif	/* CONFIG_CGROUP_CPUACCT */
+
+#ifdef CONFIG_KVM_VDI
+unsigned int __read_mostly sysctl_sched_vm_preempt_mode = 0UL;
+
+void set_interactive_phase(struct sched_entity *se, int interactive_phase)
+{
+	if (likely(se && se->cfs_rq))
+		se->cfs_rq->tg->interactive_phase = interactive_phase;
+}
+EXPORT_SYMBOL_GPL(set_interactive_phase);
+
+unsigned int __read_mostly sysctl_kvm_vamp	 = 0;
+EXPORT_SYMBOL_GPL(sysctl_kvm_vamp);
+
+void adjust_vcpu_shares(struct task_struct *p, 
+		unsigned int new_flags, int bg_nice)
+{  
+	if (sysctl_kvm_vamp) {
+		/* set_user_nice changes weight based on a type, 
+		 * and enq/deq for queued one */
+		if (new_flags & VF_BACKGROUND)
+			set_user_nice(p, bg_nice);
+		else
+			set_user_nice(p, 0);
+	}
+	/* update se's vcpu_flags with new_flags while retaining on_rq status */
+	p->se.vcpu_flags = (p->se.vcpu_flags & ~VF_MASK) | new_flags;
+}
+EXPORT_SYMBOL_GPL(adjust_vcpu_shares);
+
+unsigned int __read_mostly sysctl_kvm_partial_boost	 = 0;
+EXPORT_SYMBOL_GPL(sysctl_kvm_partial_boost);
+
+int request_boost(struct task_struct *p)
+{
+	struct rq *rq;
+	unsigned long flags;
+	int ret = 0;
+
+	if (!sysctl_kvm_partial_boost)
+		return 0;	/* 0: skip */
+
+	p->se.boost_flag = BOOST_REQUESTED;
+	if (!p->on_rq || p->on_cpu)
+		return 1;	/* 1: mark only */
+
+	rq = task_rq_lock(p, &flags);
+	if (p->se.on_rq) {
+		ret = 2;	/* 2: set buddy only */
+		set_boost_buddy(&p->se);
+		if (cpu_curr(task_cpu(p))->tgid != p->tgid) {
+			ret = 3;	/* 3: set buddy & resched */
+			resched_task(rq->curr);
+		}
+	}
+	task_rq_unlock(rq, p, &flags);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(request_boost);
+
+void yield_from_boost(struct task_struct *p)
+{
+	if (p->se.boost_flag != BOOST_DONE)
+		return;
+	/* make sure p is currently running */
+	BUG_ON(p != current);
+
+	resched_cpu(smp_processor_id());
+}
+EXPORT_SYMBOL_GPL(yield_from_boost);
+#endif
 

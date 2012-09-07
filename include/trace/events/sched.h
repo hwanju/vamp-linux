@@ -439,6 +439,28 @@ TRACE_EVENT(sched_enqueue_entity,
 	TP_printk("tgid=%d pid=%d vruntime=%lld",
                 __entry->tgid, __entry->pid, __entry->vruntime)
 );
+/* following is for partial boosting */
+TRACE_EVENT(sched_boost_pick,
+
+	TP_PROTO(struct task_struct *task, struct sched_entity *boost, struct sched_entity *left, struct sched_entity *se),
+
+	TP_ARGS(task, boost, left, se),
+
+	TP_STRUCT__entry(
+		__field( u64,	boost_vruntime	)
+		__field( u64,	left_vruntime	)
+		__field( u64,	se_vruntime	)
+	),
+
+	TP_fast_assign(
+		__entry->boost_vruntime	= boost->vruntime;
+		__entry->left_vruntime	= left->vruntime;
+		__entry->se_vruntime	= se->vruntime;
+	),
+
+	TP_printk("boost_vruntime=%llu left_vruntime=%llu se_vruntime=%llu",
+                __entry->boost_vruntime, __entry->left_vruntime, __entry->se_vruntime)
+);
 #endif
 
 #endif /* _TRACE_SCHED_H */

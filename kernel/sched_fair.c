@@ -1099,6 +1099,19 @@ static void __clear_buddies_skip(struct sched_entity *se)
 	}
 }
 
+#ifdef CONFIG_KVM_VDI
+static void __clear_buddies_boost(struct sched_entity *se)
+{
+	for_each_sched_entity(se) {
+		struct cfs_rq *cfs_rq = cfs_rq_of(se);
+		if (cfs_rq->boost == se)
+			cfs_rq->boost = NULL;
+		else
+			break;
+	}
+}
+#endif
+
 static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	if (cfs_rq->last == se)
@@ -1109,6 +1122,11 @@ static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 	if (cfs_rq->skip == se)
 		__clear_buddies_skip(se);
+
+#ifdef CONFIG_KVM_VDI
+	if (cfs_rq->boost == se)
+		__clear_buddies_boost(se);
+#endif
 }
 
 static void
@@ -1263,6 +1281,37 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1)
 		se = cfs_rq->next;
 
+#ifdef CONFIG_KVM_VDI
+	/*
+	 * Prefer boost buddy finally to next buddy.
+	 */
+	if (cfs_rq->boost) {
+		if (parent_entity(cfs_rq->boost) &&
+		    parent_entity(cfs_rq->boost)->boost_flag == BOOST_DONE)
+			cfs_rq->boost->boost_flag = BOOST_DONE;
+
+		if (cfs_rq->boost != se) {
+			cfs_rq->boost->boost_flag = BOOST_DONE;
+			/* sysctl_kvm_partial_boost == 1: follow CFS fairness
+			 *                          == 2: unconditionally
+			 */
+			if ((sysctl_kvm_partial_boost == 1 &&
+			     wakeup_preempt_entity(cfs_rq->boost, left) < 1) ||
+			    sysctl_kvm_partial_boost == 2)
+				se = cfs_rq->boost;
+			trace_sched_boost_pick(
+					entity_is_task(cfs_rq->boost) ?
+					task_of(cfs_rq->boost) : NULL,
+					cfs_rq->boost, left, se);
+		}
+		/* if at least one ancestor has been boosted,
+		 * its leaf task is marked as boosted by inheritance */
+		else if (parent_entity(cfs_rq->boost) &&
+			 parent_entity(cfs_rq->boost)->boost_flag == BOOST_DONE)
+			cfs_rq->boost->boost_flag = BOOST_DONE;
+	}
+#endif
+
 	clear_buddies(cfs_rq, se);
 
 	return se;
@@ -1284,6 +1333,9 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 		__enqueue_entity(cfs_rq, prev);
 	}
 	cfs_rq->curr = NULL;
+#ifdef CONFIG_KVM_VDI
+	prev->boost_flag = 0;
+#endif
 }
 
 static void
@@ -1909,6 +1961,14 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 {
 	s64 gran, vdiff = curr->vruntime - se->vruntime;
 
+#ifdef CONFIG_KVM_VDI
+	if (sysctl_sched_vm_preempt_mode & 0x1 &&       /* inter-VM disabled */
+			group_cfs_rq(curr) && group_cfs_rq(se))
+		return -1;
+	if (sysctl_sched_vm_preempt_mode & 0x2 &&       /* intra-VM disabled */
+			curr->is_vcpu)
+		return -1;
+#endif
 	if (vdiff <= 0)
 		return -1;
 	gran = wakeup_gran(curr, se);
@@ -1941,6 +2001,14 @@ static void set_skip_buddy(struct sched_entity *se)
 	for_each_sched_entity(se)
 		cfs_rq_of(se)->skip = se;
 }
+
+#ifdef CONFIG_KVM_VDI
+static void set_boost_buddy(struct sched_entity *se)
+{
+	for_each_sched_entity(se)
+		cfs_rq_of(se)->boost = se;
+}
+#endif
 
 /*
  * Preempt the current task with a newly woken task if needed:
@@ -1985,6 +2053,13 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 		return;
 
 	update_curr(cfs_rq);
+#ifdef CONFIG_KVM_VDI
+	if (pse->boost_flag) {
+		set_boost_buddy(pse);
+		if (curr->tgid != p->tgid)
+			goto preempt;
+	}
+#endif
 	find_matching_se(&se, &pse);
 	BUG_ON(!pse);
 	if (wakeup_preempt_entity(se, pse) == 1) {

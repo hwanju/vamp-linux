@@ -22,6 +22,9 @@
 
 #include <linux/kvm_host.h>
 #include <linux/slab.h>
+#ifdef CONFIG_KVM_VDI
+#include <linux/kvm_task_aware.h>
+#endif
 #include <trace/events/kvm.h>
 
 #include <asm/msidef.h>
@@ -97,12 +100,11 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			continue;
 
 		if (!kvm_is_dm_lowest_prio(irq)) {
-#ifdef CONFIG_KVM_VDI
-			if (irq->ipi)
-				trace_kvm_ipi(src->vcpu, vcpu, irq);
-#endif
 			if (r < 0)
 				r = 0;
+#ifdef CONFIG_KVM_VDI
+			check_boost_event(src->vcpu, vcpu, irq);
+#endif
 			r += kvm_apic_set_irq(vcpu, irq);
 		} else if (kvm_lapic_enabled(vcpu)) {
 			if (!lowest)
@@ -111,8 +113,15 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 				lowest = vcpu;
 		}
 	}
+#ifdef CONFIG_KVM_VDI
+	if (lowest) {
+		check_boost_event(src ? src->vcpu : NULL, lowest, irq);
+		r = kvm_apic_set_irq(lowest, irq);
+	}
+#else	/* original code */
 	if (lowest)
 		r = kvm_apic_set_irq(lowest, irq);
+#endif
 
 	return r;
 }

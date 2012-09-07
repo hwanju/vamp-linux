@@ -362,6 +362,20 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 	},
+	{
+		.procname	= "kvm_partial_boost",
+		.data		= &sysctl_kvm_partial_boost,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+	},
+	{
+		.procname       = "sched_vm_preempt_mode",
+		.data           = &sysctl_sched_vm_preempt_mode,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
 #endif
 	{
 		.procname	= "sched_rt_period_us",

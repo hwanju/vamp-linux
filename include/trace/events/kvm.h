@@ -307,9 +307,10 @@ TRACE_EVENT(
 #endif
 
 #ifdef CONFIG_KVM_VDI
+#include <linux/kvm_task_aware.h>
 TRACE_EVENT(kvm_vcpu_switch,
-	TP_PROTO(int op, struct kvm_vcpu *vcpu, u64 schedstat),
-	TP_ARGS(op, vcpu, schedstat),
+	TP_PROTO(int op, struct kvm_vcpu *vcpu, struct task_struct *task, u64 schedstat),
+	TP_ARGS(op, vcpu, task, schedstat),
 
 	TP_STRUCT__entry(
 		__field(	int,		op              )
@@ -329,14 +330,14 @@ TRACE_EVENT(kvm_vcpu_switch,
 		__entry->vcpu_id, __entry->op ? "run_delay" : "exec_time", 
 		__entry->schedstat, __entry->state)
 );
-#define trace_kvm_vcpu_switch_arrive(vcpu, schedstat) \
-        trace_kvm_vcpu_switch(1, vcpu, schedstat)
-#define trace_kvm_vcpu_switch_depart(vcpu, schedstat) \
-        trace_kvm_vcpu_switch(0, vcpu, schedstat)
+#define trace_kvm_vcpu_switch_arrive(vcpu, task, schedstat) \
+        trace_kvm_vcpu_switch(1, vcpu, task, schedstat)
+#define trace_kvm_vcpu_switch_depart(vcpu, task, schedstat) \
+        trace_kvm_vcpu_switch(0, vcpu, task, schedstat)
 
 TRACE_EVENT(kvm_gthread_switch,
-	TP_PROTO(int op, unsigned long guest_task_id, int vcpu_id, unsigned int load_idx, u64 cpu_load, unsigned int flags, int para_id, char *task_name, unsigned long as_root),
-	TP_ARGS(op, guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root),
+	TP_PROTO(int op, struct kvm_vcpu *vcpu, unsigned int load_idx, u64 cpu_load, long long exec_time),
+	TP_ARGS(op, vcpu, load_idx, cpu_load, exec_time),
 
 	TP_STRUCT__entry(
 		__field(	int,		op              )
@@ -345,32 +346,26 @@ TRACE_EVENT(kvm_gthread_switch,
 		__field(	unsigned int,   load_idx        )
 		__field(	u64,		cpu_load        )
 		__field(	unsigned int,   flags           )
-		__field(	int,	        para_id		)
-		__array(	char,	comm,	16		)
-		__field(	unsigned long,	as_root		)
 	),
 
 	TP_fast_assign(
 		__entry->op             = op;
-		__entry->vcpu_id        = vcpu_id;
-		__entry->guest_task_id  = guest_task_id;
+		__entry->vcpu_id        = vcpu->vcpu_id;
+		__entry->guest_task_id  = vcpu->cur_guest_task ? vcpu->cur_guest_task->id : 0;
 		__entry->load_idx       = load_idx;
 		__entry->cpu_load       = cpu_load;
-		__entry->flags          = flags;
-		__entry->para_id	= para_id;
-		memcpy(__entry->comm, task_name, TASK_COMM_LEN);
-		__entry->as_root	= as_root;
+		__entry->flags          = vcpu->cur_guest_task ? vcpu->cur_guest_task->flags : 0;
 	),
 
-	TP_printk("%s gtid=%05lx v%d load_idx=%u cpu_load=%llu flags=%u para_id=%d name=%s as_root=%05lx", 
+	TP_printk("%s gtid=%05lx v%d load_idx=%u cpu_load=%llu flags=%u", 
 			__entry->op ? "arrive" : "depart", 
 			__entry->guest_task_id, __entry->vcpu_id, __entry->load_idx, __entry->cpu_load, 
-			__entry->flags, __entry->para_id, __entry->comm, __entry->as_root)
+			__entry->flags)
 );
-#define trace_kvm_gthread_switch_arrive(guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root) \
-        trace_kvm_gthread_switch(1, guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root)
-#define trace_kvm_gthread_switch_depart(guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root) \
-        trace_kvm_gthread_switch(0, guest_task_id, vcpu_id, load_idx, cpu_load, flags, para_id, task_name, as_root)
+#define trace_kvm_gthread_switch_arrive(vcpu, load_idx, cpu_load, exec_time) \
+        trace_kvm_gthread_switch(1, vcpu, load_idx, cpu_load, exec_time)
+#define trace_kvm_gthread_switch_depart(vcpu, load_idx, cpu_load, exec_time) \
+        trace_kvm_gthread_switch(0, vcpu, load_idx, cpu_load, exec_time)
 
 TRACE_EVENT(kvm_ui,
 	TP_PROTO(struct kvm *kvm, int event_type, int event_info, unsigned int load_idx),
@@ -522,8 +517,8 @@ TRACE_EVENT(kvm_load_info,
 );
 
 TRACE_EVENT(kvm_gtask_stat,
-	TP_PROTO(int vm_id, int interactive_phase, unsigned long guest_task_id, unsigned int cpu_load, unsigned int flags),
-	TP_ARGS(vm_id, interactive_phase, guest_task_id, cpu_load, flags),
+	TP_PROTO(struct kvm *kvm, struct guest_task_struct *gtask, unsigned int cpu_load),
+	TP_ARGS(kvm, gtask, cpu_load),
 
 	TP_STRUCT__entry(
 		__field(	int,            vm_id                   )
@@ -534,11 +529,11 @@ TRACE_EVENT(kvm_gtask_stat,
 	),
 
 	TP_fast_assign(
-                __entry->vm_id                  = vm_id;
-                __entry->interactive_phase      = interactive_phase;
-                __entry->guest_task_id          = guest_task_id;
+                __entry->vm_id                  = kvm->vm_id;
+                __entry->interactive_phase      = kvm->interactive_phase;
+                __entry->guest_task_id          = gtask->id;
                 __entry->cpu_load               = cpu_load;
-                __entry->flags                  = flags;
+                __entry->flags                  = gtask->flags;
 	),
 
 	TP_printk("vm%d interactive_phase=%d gtid=%05lx cpu_load=%u flags=%u", __entry->vm_id, 

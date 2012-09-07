@@ -49,7 +49,9 @@ struct kvm_guest_task {
 	s32 task_id;		/* tgid */
 	s8 task_name[16];	/* for debugging: TASK_COMM_LEN=16 */
 	u64 as_root;		/* address space root */
-	u8 pad[36];		/* 36 = 64 - 4 - 16 - 8 */
+	u64 debug_val1;		/* debug value */
+	u64 debug_val2;		/* debug value */
+	u8 pad[20];		/* 20 = 64 - 4 - 16 - 8 - 8 - 8 */
 };
 /* End of CONFIG_KVM_VDI-para */
 
