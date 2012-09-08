@@ -43,15 +43,15 @@
 #define KVM_GTASK_VALID_BITS ((-1ULL << (KVM_GTASK_ALIGNMENT_BITS + 1)))
 #define KVM_GTASK_RESERVED_MASK (((1 << KVM_GTASK_ALIGNMENT_BITS) - 1 ) << 1)
 
-#define KVM_MAX_SLOW_TASKS		8       /* power of 2 */
+#define KVM_MAX_SLOW_TASKS		16       /* power of 2 */
 #define KVM_SLOW_TASK_MASK		(KVM_MAX_SLOW_TASKS-1)
 struct kvm_guest_task {
 	s32 task_id;		/* tgid */
-	s8 task_name[16];	/* for debugging: TASK_COMM_LEN=16 */
+	s8  task_name[16];	/* for debugging: TASK_COMM_LEN=16 */
 	u64 as_root;		/* address space root */
-	u64 debug_val1;		/* debug value */
-	u64 debug_val2;		/* debug value */
-	u8 pad[20];		/* 20 = 64 - 4 - 16 - 8 - 8 - 8 */
+	u8  nr_slow_task;
+	s32 slow_task_id[KVM_MAX_SLOW_TASKS];
+	u8 pad[35];		/* 35 = 128 - 4 - 16 - 8 - 1 - (4*16) */
 };
 /* End of CONFIG_KVM_VDI-para */
 

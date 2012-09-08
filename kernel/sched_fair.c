@@ -376,6 +376,7 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 
 #ifdef CONFIG_KVM_VDI
 #include <linux/kvm_task_aware.h>
+#if 0
 /* currently not used, but will be exploitted */
 static int is_interactive_phase(struct cfs_rq *rq)
 {
@@ -384,6 +385,7 @@ static int is_interactive_phase(struct cfs_rq *rq)
 
 	return rq->tg->interactive_phase;
 }
+#endif
 static DEFINE_PER_CPU_SHARED_ALIGNED(int, interactive_count);
 static inline void inc_interactive_count(int cpu)
 {

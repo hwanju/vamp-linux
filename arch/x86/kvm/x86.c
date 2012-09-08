@@ -1471,24 +1471,30 @@ static void kvmclock_reset(struct kvm_vcpu *vcpu)
 }
 
 #ifdef CONFIG_KVM_VDI
-char *kvm_get_guest_task(struct kvm_vcpu *vcpu, int *task_id, 
-		unsigned long *as_root)
+int kvm_get_guest_task(struct kvm_vcpu *vcpu)
 {
-	*task_id = 0;
 	if (!(vcpu->arch.gt.msr_val & KVM_MSR_ENABLED))
-		return NULL;
+		return -EPERM;
 
 	if (unlikely(kvm_read_guest_cached(vcpu->kvm, &vcpu->arch.gt.gtask_cache,
 					&vcpu->arch.gt.gtask, 
 					sizeof(struct kvm_guest_task))))
-		return NULL;
-
-	*task_id = vcpu->arch.gt.gtask.task_id;
-	*as_root = vcpu->arch.gt.gtask.as_root;
-
-	return vcpu->arch.gt.gtask.task_name;
+		return -EFAULT;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_get_guest_task);
+int kvm_set_guest_task(struct kvm_vcpu *vcpu)
+{
+	if (!(vcpu->arch.gt.msr_val & KVM_MSR_ENABLED))
+		return -EPERM;
+
+	if (unlikely(kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.gt.gtask_cache,
+					&vcpu->arch.gt.gtask, 
+					sizeof(struct kvm_guest_task))))
+		return -EFAULT;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(kvm_set_guest_task);
 #endif
 
 int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data)
@@ -1575,7 +1581,7 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 		break;
 #ifdef CONFIG_KVM_VDI
 	case MSR_KVM_GUEST_TASK:
-                /* share bitmask */
+                /* TO BE DEPRECATED: share bitmask */
 		if (data & KVM_GTASK_RESERVED_MASK)
 			return 1;
 

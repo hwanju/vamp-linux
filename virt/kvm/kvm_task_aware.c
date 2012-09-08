@@ -7,8 +7,8 @@
 #include <linux/timer.h>
 #include <linux/sched.h>
 
-char *kvm_get_guest_task(struct kvm_vcpu *vcpu, int *task_id,
-		unsigned long *as_root);
+int kvm_get_guest_task(struct kvm_vcpu *vcpu);
+int kvm_set_guest_task(struct kvm_vcpu *vcpu);
 
 #define set_guest_thread_state(guest_thread, state_value)     \
 	set_mb(guest_thread->state, (state_value))
@@ -449,6 +449,9 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 	unsigned long long pre_monitor_timestamp = now - pre_monitor_duration;
 	unsigned int vm_load = 0;       /* for debugging */
 
+	/* for paravirt */
+	struct kvm_guest_task *gt = &kvm->vcpus[0]->arch.gt.gtask;
+
 	trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, 
 			load_period_msec, pre_monitor_timestamp, now);
 
@@ -480,6 +483,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 
 	/* scan gtask loads for pre-monitoring period */
 	spin_lock(&kvm->guest_task_lock);
+	gt->nr_slow_task = 0;
 	for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
 		struct guest_task_struct *iter_gtask;
 		struct hlist_node *node;
@@ -522,14 +526,20 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 			if (kvm->interactive_phase == MIXED_INTERACTIVE_PHASE &&
 			    iter_gtask->pre_monitor_load > 
 							bg_load_thresh_pct &&
-			    !is_system_task(kvm, iter_gtask))
+			    !is_system_task(kvm, iter_gtask)) {
 				iter_gtask->flags |= VF_BACKGROUND;
+
+				if (gt->nr_slow_task < KVM_MAX_SLOW_TASKS)
+					gt->slow_task_id[gt->nr_slow_task++]
+						= iter_gtask->para_id;
+			}
 			
 			if (valid_load_task)
 				trace_kvm_gtask_stat(kvm, iter_gtask, 
 						iter_gtask->pre_monitor_load);
 		}
 	}
+	kvm_set_guest_task(kvm->vcpus[0]);
 	spin_unlock(&kvm->guest_task_lock);
 
 	/* connect to scheduler core for notification of interactive phase */
@@ -711,11 +721,9 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 				struct guest_thread_info *guest_thread, 
 				unsigned long long now)
 {
-	int para_id;
-	unsigned long as_root;
-
-	kvm_get_guest_task(vcpu, &para_id, &as_root);	/* for tracing */
-
+	kvm_get_guest_task(vcpu);
+	vcpu->cur_guest_task->para_id = vcpu->arch.gt.gtask.task_id;
+	
 	guest_thread->cpu = vcpu->cpu;	/* FIXME: deprecated */
 	guest_thread->last_arrival = now;
 	check_load_epoch(vcpu, guest_thread, now);

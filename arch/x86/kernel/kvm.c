@@ -59,9 +59,11 @@ struct kvm_para_state {
 static DEFINE_PER_CPU(struct kvm_para_state, para_state);
 static DEFINE_PER_CPU(struct kvm_vcpu_pv_apf_data, apf_reason) __aligned(64);
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-DEFINE_PER_CPU(struct kvm_guest_task, guest_task) __aligned(64);
+#include <linux/seq_file.h>
+#include <linux/proc_fs.h>
+DEFINE_PER_CPU(struct kvm_guest_task, guest_task) __aligned(128);
 EXPORT_PER_CPU_SYMBOL_GPL(guest_task);
-static int has_guest_task_classifier = 0;
+static int has_guest_task_enlightenment = 0;
 #endif
 
 static struct kvm_para_state *kvm_para_state(void)
@@ -452,7 +454,7 @@ static void kvm_register_guest_task(void)
         int cpu = smp_processor_id();
 	struct kvm_guest_task *gt = &per_cpu(guest_task, cpu);
 
-        if (!has_guest_task_classifier)
+        if (!has_guest_task_enlightenment)
                 return;
 
 	//memset(gt, 0, sizeof(*gt));
@@ -462,11 +464,48 @@ static void kvm_register_guest_task(void)
 }
 void kvm_disable_guest_task(void)
 {
-	if (!has_guest_task_classifier)
+	if (!has_guest_task_enlightenment)
 		return;
 
 	wrmsr(MSR_KVM_GUEST_TASK, 0, 0);
 }
+static int slow_task_show(struct seq_file *m, void *v)
+{
+	int i;
+	struct kvm_guest_task *gt = &per_cpu(guest_task, 0);
+
+	for (i = 0 ; i < gt->nr_slow_task ; i++)
+		seq_printf(m, "%d\n", gt->slow_task_id[i]);
+	return 0;
+}
+
+static ssize_t
+slow_task_write(struct file *file, const char __user *buf, size_t count,
+	     loff_t *offs)
+{
+	/* Do nothing currently */
+	return 1;
+}
+
+static int slow_task_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, slow_task_show, NULL);
+}
+
+static const struct file_operations slow_task_fops = {
+	.open		= slow_task_open,
+	.read		= seq_read,
+	.write		= slow_task_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int __init init_slow_task_procfs(void)
+{
+	proc_create("kvm_slow_task", 0644, NULL, &slow_task_fops);
+	return 0;
+}
+device_initcall(init_slow_task_procfs);
 #endif
 
 void __cpuinit kvm_guest_cpu_init(void)
@@ -486,7 +525,7 @@ void __cpuinit kvm_guest_cpu_init(void)
 		       smp_processor_id());
 	}
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-        if (has_guest_task_classifier)
+        if (has_guest_task_enlightenment)
                 kvm_register_guest_task();
 #endif
 }
@@ -585,7 +624,7 @@ void __init kvm_guest_init(void)
 
 #ifdef CONFIG_KVM_VDI	/* guest-side */
 	if (kvm_para_has_feature(KVM_FEATURE_GUEST_TASK))
-		has_guest_task_classifier = 1;
+		has_guest_task_enlightenment = 1;
 #endif
 #ifdef CONFIG_SMP
 	smp_ops.smp_prepare_boot_cpu = kvm_smp_prepare_boot_cpu;
