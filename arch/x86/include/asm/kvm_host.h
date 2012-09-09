@@ -487,6 +487,14 @@ struct kvm_arch {
 	#ifdef CONFIG_KVM_MMU_AUDIT
 	int audit_point;
 	#endif
+
+#ifdef CONFIG_KVM_VDI
+        struct {
+                u64 msr_val;
+                struct gfn_to_hva_cache stask_cache;
+                struct kvm_slow_task_info stask_info;
+        } sti;
+#endif
 };
 
 struct kvm_vm_stat {

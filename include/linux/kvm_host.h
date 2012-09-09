@@ -332,6 +332,8 @@ struct kvm {
 				 * MIXED_INTERACTIVE_PHASE: slow path */
 	unsigned long system_task_id;
 	pid_t vm_id;    /* for tracing (non-mandatory) */
+#define KVM_REQ_SLOW_TASK	0
+	unsigned long requests;
 #endif
 };
 

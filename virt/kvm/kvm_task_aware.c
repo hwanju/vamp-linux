@@ -8,7 +8,7 @@
 #include <linux/sched.h>
 
 int kvm_get_guest_task(struct kvm_vcpu *vcpu);
-int kvm_set_guest_task(struct kvm_vcpu *vcpu);
+int kvm_set_slow_task(struct kvm *kvm);
 
 #define set_guest_thread_state(guest_thread, state_value)     \
 	set_mb(guest_thread->state, (state_value))
@@ -450,7 +450,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 	unsigned int vm_load = 0;       /* for debugging */
 
 	/* for paravirt */
-	struct kvm_guest_task *gt = &kvm->vcpus[0]->arch.gt.gtask;
+	struct kvm_slow_task_info *sti = &kvm->arch.sti.stask_info;
 
 	trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, 
 			load_period_msec, pre_monitor_timestamp, now);
@@ -483,7 +483,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 
 	/* scan gtask loads for pre-monitoring period */
 	spin_lock(&kvm->guest_task_lock);
-	gt->nr_slow_task = 0;
+	sti->nr_tasks = 0;
 	for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
 		struct guest_task_struct *iter_gtask;
 		struct hlist_node *node;
@@ -529,9 +529,13 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 			    !is_system_task(kvm, iter_gtask)) {
 				iter_gtask->flags |= VF_BACKGROUND;
 
-				if (gt->nr_slow_task < KVM_MAX_SLOW_TASKS)
-					gt->slow_task_id[gt->nr_slow_task++]
-						= iter_gtask->para_id;
+				if (sti->nr_tasks < KVM_MAX_SLOW_TASKS) {
+					sti->tasks[sti->nr_tasks].task_id = 
+						iter_gtask->para_id;
+					sti->tasks[sti->nr_tasks].load_pct =
+						iter_gtask->pre_monitor_load;
+					sti->nr_tasks++;
+				}
 			}
 			
 			if (valid_load_task)
@@ -539,7 +543,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 						iter_gtask->pre_monitor_load);
 		}
 	}
-	kvm_set_guest_task(kvm->vcpus[0]);
+	set_bit(KVM_REQ_SLOW_TASK, &kvm->requests);
 	spin_unlock(&kvm->guest_task_lock);
 
 	/* connect to scheduler core for notification of interactive phase */
@@ -578,6 +582,16 @@ static void clear_gtask_flags(struct kvm *kvm)
 			iter_gtask->flags = 0;
 	}
 	spin_unlock(&kvm->guest_task_lock);
+}
+
+static void finish_interactive_period(struct kvm *kvm)
+{
+	trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
+	kvm->interactive_phase = NORMAL_PHASE;
+	clear_gtask_flags(kvm);
+
+	kvm->arch.sti.stask_info.nr_tasks = 0;
+	set_bit(KVM_REQ_SLOW_TASK, &kvm->requests);
 }
 
 #define in_interactive_phase(kvm, now)  \
@@ -700,9 +714,7 @@ static void load_timer_handler(unsigned long data)
 	}
 
 finish_interactive_phase:
-	trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
-	kvm->interactive_phase = NORMAL_PHASE;
-	clear_gtask_flags(kvm);
+	finish_interactive_period(kvm);
 
 	/* connect to scheduler core for notification of 
 	 * the end of interactive phase */
@@ -821,6 +833,9 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 	struct guest_thread_info *cur_guest_thread;
 	unsigned long long now = sched_clock();
 
+	if (test_and_clear_bit(KVM_REQ_SLOW_TASK, &vcpu->kvm->requests))
+		kvm_set_slow_task(vcpu->kvm);
+
 	/* run_delay (wait time) accounting */
 	vcpu->run_delay = current->se.statistics.wait_sum;
 	set_vcpu_state(vcpu, VCPU_RUNNING);
@@ -907,11 +922,8 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now)
 				max_interactive_phase_msec);
 
 		del_timer_sync(&kvm->load_timer);
-		if (kvm->interactive_phase) {
-			trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
-			kvm->interactive_phase = NORMAL_PHASE;
-			clear_gtask_flags(kvm);
-		}
+		if (kvm->interactive_phase)
+			finish_interactive_period(kvm);
 
 		kvm_for_each_vcpu(vidx, vcpu, kvm) {
 			/* if last_arrival > t -> 

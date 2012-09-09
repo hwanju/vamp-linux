@@ -22,6 +22,7 @@
 #define KVM_FEATURE_CLOCKSOURCE2        3
 #define KVM_FEATURE_ASYNC_PF		4
 #define KVM_FEATURE_GUEST_TASK		8	/* CONFIG_KVM_VDI-para */
+#define KVM_FEATURE_SLOW_TASK		9	/* CONFIG_KVM_VDI-para */
 
 /* The last 8 bits are used to indicate how to interpret the flags field
  * in pvclock structure. If no bits are set, all flags are ignored.
@@ -37,21 +38,27 @@
 #define MSR_KVM_ASYNC_PF_EN 0x4b564d02
 /* CONFIG_KVM_VDI-para */
 #define MSR_KVM_GUEST_TASK	0x4b564d05
+#define MSR_KVM_SLOW_TASK	0x4b564d06
 
 #define KVM_MSR_ENABLED 1
 #define KVM_GTASK_ALIGNMENT_BITS 5
 #define KVM_GTASK_VALID_BITS ((-1ULL << (KVM_GTASK_ALIGNMENT_BITS + 1)))
 #define KVM_GTASK_RESERVED_MASK (((1 << KVM_GTASK_ALIGNMENT_BITS) - 1 ) << 1)
 
-#define KVM_MAX_SLOW_TASKS		16       /* power of 2 */
-#define KVM_SLOW_TASK_MASK		(KVM_MAX_SLOW_TASKS-1)
-struct kvm_guest_task {
+#define KVM_MAX_SLOW_TASKS		8       /* power of 2 */
+struct kvm_guest_task {	/* per-vcpu shared struct */
 	s32 task_id;		/* tgid */
 	s8  task_name[16];	/* for debugging: TASK_COMM_LEN=16 */
 	u64 as_root;		/* address space root */
-	u8  nr_slow_task;
-	s32 slow_task_id[KVM_MAX_SLOW_TASKS];
-	u8 pad[35];		/* 35 = 128 - 4 - 16 - 8 - 1 - (4*16) */
+	u8  pad[36];		/* 36 = 64 - 4 - 16 - 8 */
+};
+struct kvm_slow_task {
+	s32 task_id;
+	u16 load_pct;
+};
+struct kvm_slow_task_info {	/* per-vm shared struct */
+	u8  nr_tasks;
+	struct kvm_slow_task tasks[KVM_MAX_SLOW_TASKS];
 };
 /* End of CONFIG_KVM_VDI-para */
 
@@ -199,7 +206,7 @@ void kvm_async_pf_task_wait(u32 token);
 void kvm_async_pf_task_wake(u32 token);
 u32 kvm_read_and_reset_pf_reason(void);
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-extern void kvm_disable_guest_task(void);
+extern void kvm_disable_paravirt_vdi(void);
 #endif
 #else
 #define kvm_guest_init() do { } while (0)

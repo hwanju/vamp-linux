@@ -61,8 +61,9 @@ static DEFINE_PER_CPU(struct kvm_vcpu_pv_apf_data, apf_reason) __aligned(64);
 #ifdef CONFIG_KVM_VDI	/* guest-side */
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
-DEFINE_PER_CPU(struct kvm_guest_task, guest_task) __aligned(128);
+DEFINE_PER_CPU(struct kvm_guest_task, guest_task) __aligned(64);
 EXPORT_PER_CPU_SYMBOL_GPL(guest_task);
+struct kvm_slow_task_info slow_task_info __aligned(64);
 static int has_guest_task_enlightenment = 0;
 #endif
 
@@ -457,25 +458,48 @@ static void kvm_register_guest_task(void)
         if (!has_guest_task_enlightenment)
                 return;
 
-	//memset(gt, 0, sizeof(*gt));
-
 	wrmsrl(MSR_KVM_GUEST_TASK, (__pa(gt) | KVM_MSR_ENABLED));
 	printk(KERN_INFO "kvm-gtask: cpu %d, msr %lx\n", cpu, __pa(gt));
 }
-void kvm_disable_guest_task(void)
+static void kvm_disable_guest_task(void)
 {
 	if (!has_guest_task_enlightenment)
 		return;
 
 	wrmsr(MSR_KVM_GUEST_TASK, 0, 0);
 }
+static void kvm_register_slow_task(void)
+{
+	struct kvm_slow_task_info *sti = &slow_task_info;
+
+        if (!has_guest_task_enlightenment)
+                return;
+
+	memset(sti, 0, sizeof(*sti));
+
+	wrmsrl(MSR_KVM_SLOW_TASK, (__pa(sti) | KVM_MSR_ENABLED));
+	printk(KERN_INFO "kvm-stask: %lx\n", __pa(sti));
+}
+static void kvm_disable_slow_task(void)
+{
+	if (!has_guest_task_enlightenment)
+		return;
+
+	wrmsr(MSR_KVM_SLOW_TASK, 0, 0);
+}
+void kvm_disable_paravirt_vdi(void)
+{
+	kvm_disable_guest_task();
+	kvm_disable_slow_task();
+}
 static int slow_task_show(struct seq_file *m, void *v)
 {
 	int i;
-	struct kvm_guest_task *gt = &per_cpu(guest_task, 0);
+	struct kvm_slow_task_info *sti = &slow_task_info;
 
-	for (i = 0 ; i < gt->nr_slow_task ; i++)
-		seq_printf(m, "%d\n", gt->slow_task_id[i]);
+	for (i = 0; i < sti->nr_tasks; i++)
+		seq_printf(m, "%d\t%u\n", 
+			sti->tasks[i].task_id, sti->tasks[i].load_pct);
 	return 0;
 }
 
@@ -574,7 +598,7 @@ static void kvm_guest_cpu_offline(void *dummy)
 	kvm_pv_disable_apf(NULL);
 	apf_task_wake_all();
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-        kvm_disable_guest_task();
+        kvm_disable_paravirt_vdi();
 #endif
 }
 
@@ -623,8 +647,10 @@ void __init kvm_guest_init(void)
 		x86_init.irqs.trap_init = kvm_apf_trap_init;
 
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-	if (kvm_para_has_feature(KVM_FEATURE_GUEST_TASK))
+	if (kvm_para_has_feature(KVM_FEATURE_GUEST_TASK)) {
 		has_guest_task_enlightenment = 1;
+		kvm_register_slow_task();
+	}
 #endif
 #ifdef CONFIG_SMP
 	smp_ops.smp_prepare_boot_cpu = kvm_smp_prepare_boot_cpu;

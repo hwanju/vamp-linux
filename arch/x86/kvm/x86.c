@@ -1483,18 +1483,18 @@ int kvm_get_guest_task(struct kvm_vcpu *vcpu)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_get_guest_task);
-int kvm_set_guest_task(struct kvm_vcpu *vcpu)
+int kvm_set_slow_task(struct kvm *kvm)
 {
-	if (!(vcpu->arch.gt.msr_val & KVM_MSR_ENABLED))
+	if (!(kvm->arch.sti.msr_val & KVM_MSR_ENABLED))
 		return -EPERM;
 
-	if (unlikely(kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.gt.gtask_cache,
-					&vcpu->arch.gt.gtask, 
-					sizeof(struct kvm_guest_task))))
+	if (unlikely(kvm_write_guest_cached(kvm, &kvm->arch.sti.stask_cache,
+					&kvm->arch.sti.stask_info, 
+					sizeof(struct kvm_slow_task_info))))
 		return -EFAULT;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_set_guest_task);
+EXPORT_SYMBOL_GPL(kvm_set_slow_task);
 #endif
 
 int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data)
@@ -1590,6 +1590,14 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 			return 1;
 
 		vcpu->arch.gt.msr_val = data;
+
+		break;
+	case MSR_KVM_SLOW_TASK:
+		if (kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->kvm->arch.sti.stask_cache,
+							data & KVM_GTASK_VALID_BITS))
+			return 1;
+
+		vcpu->kvm->arch.sti.msr_val = data;
 
 		break;
 #endif
@@ -1881,6 +1889,9 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata)
 #ifdef CONFIG_KVM_VDI
 	case MSR_KVM_GUEST_TASK:
 		data = vcpu->arch.gt.msr_val;
+		break;
+	case MSR_KVM_SLOW_TASK:
+		data = vcpu->kvm->arch.sti.msr_val;
 		break;
 #endif
 	case MSR_IA32_P5_MC_ADDR:
@@ -2488,6 +2499,7 @@ static void do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 			     (1 << KVM_FEATURE_ASYNC_PF) |
 #ifdef CONFIG_KVM_VDI
 			     (1 << KVM_FEATURE_GUEST_TASK) |
+			     (1 << KVM_FEATURE_SLOW_TASK) |
 #endif
 			     (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT);
 		entry->ebx = 0;

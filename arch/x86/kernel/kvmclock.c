@@ -161,7 +161,7 @@ static void kvm_crash_shutdown(struct pt_regs *regs)
 {
 	native_write_msr(msr_kvm_system_time, 0, 0);
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-        kvm_disable_guest_task();
+        kvm_disable_paravirt_vdi();
 #endif
 	native_machine_crash_shutdown(regs);
 }
@@ -171,7 +171,7 @@ static void kvm_shutdown(void)
 {
 	native_write_msr(msr_kvm_system_time, 0, 0);
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-        kvm_disable_guest_task();
+        kvm_disable_paravirt_vdi();
 #endif
 	native_machine_shutdown();
 }
