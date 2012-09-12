@@ -599,7 +599,23 @@ TRACE_EVENT(kvm_ipi,
 
 	TP_printk("src_vcpu_id=%d dst_vcpu_id=%d vector=%u\n",
 			__entry->src_vcpu_id, __entry->dst_vcpu_id, __entry->vector)
-);  
+);
+TRACE_EVENT(kvm_audio_access,
+	TP_PROTO(struct kvm_vcpu *vcpu),
+	TP_ARGS(vcpu),
+
+	TP_STRUCT__entry(
+		__field(        int,            vcpu_id		)
+		__field(        int,            port		)
+	),              
+
+	TP_fast_assign(
+		__entry->vcpu_id    = vcpu->vcpu_id;
+		__entry->port	    = vcpu->arch.pio.port
+	),              
+
+	TP_printk("vcpu_id=%d port=%x\n", __entry->vcpu_id, __entry->port)
+);
 #endif /* CONFIG_KVM_VDI */
 #endif /* _TRACE_KVM_MAIN_H */
 

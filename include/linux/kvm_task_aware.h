@@ -78,4 +78,5 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id);
 void check_on_hlt(struct kvm_vcpu *vcpu);
 void check_boost_event(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu,
 		struct kvm_lapic_irq *irq);
+void check_audio_access(struct kvm_vcpu *vcpu);
 #endif

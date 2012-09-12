@@ -6,6 +6,9 @@
 #include <linux/kvm_task_aware.h>
 #include <linux/timer.h>
 #include <linux/sched.h>
+#include <asm/apicdef.h>
+#include "irq.h"
+#include "ioapic.h"
 
 int kvm_get_guest_task(struct kvm_vcpu *vcpu);
 int kvm_set_slow_task(struct kvm *kvm);
@@ -991,6 +994,25 @@ void check_boost_event(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu,
 	else if (irq->vector == 0x31) {
 		request_partial_boost(NULL, vcpu);
 	}
+}
+
+/* VEC_POS & REG_POS are borrowed from arch/x86/kvm/lapic.c */
+#define VEC_POS(v) ((v) & (32 - 1))
+#define REG_POS(v) (((v) >> 5) << 4)
+#define AC97_LAPIC_VECTOR	0x3b	/* 0xb (irq) | 0x30 */
+#define is_ac97_ioport(port)	(port >= 0xc800 && port <= 0xc8ff)
+static inline int audio_interrupt_context(struct kvm_vcpu *vcpu)
+{
+	struct kvm_lapic *apic = vcpu->arch.apic;
+	return test_bit(VEC_POS(AC97_LAPIC_VECTOR), 
+		(apic->regs + APIC_ISR) + REG_POS(AC97_LAPIC_VECTOR));
+}
+void check_audio_access(struct kvm_vcpu *vcpu)
+{
+	if (!is_ac97_ioport(vcpu->arch.pio.port) ||
+	    audio_interrupt_context(vcpu))
+		return;
+	trace_kvm_audio_access(vcpu);
 }
 
 /*

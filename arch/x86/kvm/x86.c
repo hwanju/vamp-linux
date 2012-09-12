@@ -4182,6 +4182,9 @@ static int emulator_pio_in_emulated(struct x86_emulate_ctxt *ctxt,
 	vcpu->arch.pio.count  = count;
 	vcpu->arch.pio.size = size;
 
+#ifdef CONFIG_KVM_VDI
+	check_audio_access(vcpu);
+#endif
 	if (!kernel_pio(vcpu, vcpu->arch.pio_data)) {
 	data_avail:
 		memcpy(val, vcpu->arch.pio_data, size * count);
