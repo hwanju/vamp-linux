@@ -3605,9 +3605,6 @@ static int handle_interrupt_window(struct kvm_vcpu *vcpu)
 static int handle_halt(struct kvm_vcpu *vcpu)
 {
 	skip_emulated_instruction(vcpu);
-#ifdef CONFIG_KVM_VDI
-        check_on_hlt(vcpu);
-#endif
 	return kvm_emulate_halt(vcpu);
 }
 

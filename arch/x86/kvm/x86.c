@@ -5006,6 +5006,9 @@ void kvm_arch_exit(void)
 int kvm_emulate_halt(struct kvm_vcpu *vcpu)
 {
 	++vcpu->stat.halt_exits;
+#ifdef CONFIG_KVM_VDI
+        check_on_hlt(vcpu);
+#endif
 	if (irqchip_in_kernel(vcpu->kvm)) {
 		vcpu->arch.mp_state = KVM_MP_STATE_HALTED;
 		return 1;

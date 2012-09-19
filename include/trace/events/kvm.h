@@ -517,8 +517,8 @@ TRACE_EVENT(kvm_load_info,
 );
 
 TRACE_EVENT(kvm_gtask_stat,
-	TP_PROTO(struct kvm *kvm, struct guest_task_struct *gtask, unsigned int cpu_load),
-	TP_ARGS(kvm, gtask, cpu_load),
+	TP_PROTO(struct kvm *kvm, struct guest_task_struct *gtask, unsigned int bg_load_thresh_pct, unsigned int cpu_load),
+	TP_ARGS(kvm, gtask, bg_load_thresh_pct, cpu_load),
 
 	TP_STRUCT__entry(
 		__field(	int,            vm_id                   )
@@ -582,8 +582,8 @@ TRACE_EVENT(kvm_system_task,
                 __entry->vcpu_id, __entry->system_task_id, __entry->cur_task_id)
 );
 TRACE_EVENT(kvm_ipi,
-	TP_PROTO(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *dst_vcpu, struct kvm_lapic_irq *irq),
-	TP_ARGS(src_vcpu, dst_vcpu, irq),
+	TP_PROTO(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *dst_vcpu, u32 vector),
+	TP_ARGS(src_vcpu, dst_vcpu, vector),
 
 	TP_STRUCT__entry(
 		__field(        int,            src_vcpu_id     )
@@ -594,15 +594,15 @@ TRACE_EVENT(kvm_ipi,
 	TP_fast_assign(
 		__entry->src_vcpu_id    = src_vcpu->vcpu_id;
 		__entry->dst_vcpu_id    = dst_vcpu->vcpu_id;
-		__entry->vector         = irq->vector;
+		__entry->vector         = vector;
 	),              
 
 	TP_printk("src_vcpu_id=%d dst_vcpu_id=%d vector=%u\n",
 			__entry->src_vcpu_id, __entry->dst_vcpu_id, __entry->vector)
 );
 TRACE_EVENT(kvm_audio_access,
-	TP_PROTO(struct kvm_vcpu *vcpu),
-	TP_ARGS(vcpu),
+	TP_PROTO(struct kvm_vcpu *vcpu, int waker_update),
+	TP_ARGS(vcpu, waker_update),
 
 	TP_STRUCT__entry(
 		__field(        int,            vcpu_id		)

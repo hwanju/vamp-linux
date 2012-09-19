@@ -28,6 +28,9 @@
 #include <linux/module.h>
 #include <linux/math64.h>
 #include <linux/slab.h>
+#ifdef CONFIG_KVM_VDI
+#include <linux/kvm_task_aware.h>
+#endif
 #include <asm/processor.h>
 #include <asm/msr.h>
 #include <asm/page.h>
@@ -1029,6 +1032,9 @@ static int kvm_apic_local_deliver(struct kvm_lapic *apic, int lvt_type)
 		vector = reg & APIC_VECTOR_MASK;
 		mode = reg & APIC_MODE_MASK;
 		trig_mode = reg & APIC_LVT_LEVEL_TRIGGER;
+#ifdef CONFIG_KVM_VDI
+		check_lapic_irq(NULL, apic->vcpu, vector, 0);
+#endif
 		return __apic_accept_irq(apic, mode, vector, 1, trig_mode);
 	}
 	return 0;

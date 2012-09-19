@@ -188,6 +188,9 @@ struct kvm_vcpu {
 	unsigned long long cur_run_delay;
 	/* accumulated load of increased guest threads */
 	unsigned int reactive_gthread_load;
+
+	struct guest_task_struct *waker_guest_task;
+	struct guest_task_struct *remote_waker_guest_task;
 #endif
 
 	struct kvm_vcpu_arch arch;

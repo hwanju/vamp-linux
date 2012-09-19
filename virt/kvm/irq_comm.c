@@ -103,7 +103,7 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			if (r < 0)
 				r = 0;
 #ifdef CONFIG_KVM_VDI
-			check_boost_event(src->vcpu, vcpu, irq);
+			check_lapic_irq(src->vcpu, vcpu, irq->vector, irq->ipi);
 #endif
 			r += kvm_apic_set_irq(vcpu, irq);
 		} else if (kvm_lapic_enabled(vcpu)) {
@@ -115,7 +115,8 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 	}
 #ifdef CONFIG_KVM_VDI
 	if (lowest) {
-		check_boost_event(src ? src->vcpu : NULL, lowest, irq);
+		check_lapic_irq(src ? src->vcpu : NULL, lowest, 
+						irq->vector, irq->ipi);
 		r = kvm_apic_set_irq(lowest, irq);
 	}
 #else	/* original code */
