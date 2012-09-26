@@ -50,7 +50,8 @@ struct kvm_guest_task {	/* per-vcpu shared struct */
 	s32 task_id;		/* tgid */
 	s8  task_name[16];	/* for debugging: TASK_COMM_LEN=16 */
 	u64 as_root;		/* address space root */
-	u8  pad[36];		/* 36 = 64 - 4 - 16 - 8 */
+	u32 debug[5];		/* 36 = 64 - 4 - 16 - 8 */
+	u64 debug64[2];		/* 20 + 16 */
 };
 struct kvm_slow_task {
 	s32 task_id;

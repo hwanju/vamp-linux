@@ -189,8 +189,9 @@ struct kvm_vcpu {
 	/* accumulated load of increased guest threads */
 	unsigned int reactive_gthread_load;
 
-	struct guest_task_struct *waker_guest_task;
-	struct guest_task_struct *remote_waker_guest_task;
+	atomic64_t local_waker_gtask;
+	atomic64_t remote_waker_gtask;
+	atomic64_t remote_wake_timestamp;
 #endif
 
 	struct kvm_vcpu_arch arch;
@@ -337,6 +338,7 @@ struct kvm {
 	pid_t vm_id;    /* for tracing (non-mandatory) */
 #define KVM_REQ_SLOW_TASK	0
 	unsigned long requests;
+	struct guest_task_struct *dominant_audio_task;	/* simple policy */
 #endif
 };
 

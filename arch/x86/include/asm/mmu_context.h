@@ -47,8 +47,8 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 		cpumask_set_cpu(cpu, mm_cpumask(next));
 
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-		kvm_para_set_task(tsk ? tsk->tgid : current->tgid, 
-				tsk ? tsk->comm : current->comm, 
+		kvm_para_set_task(tsk ? tsk->tgid : -1, 
+				tsk ? tsk->comm : "Null", 
 				__pa(next->pgd));
 #endif
 		/* Re-load page tables */

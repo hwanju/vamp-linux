@@ -2729,11 +2729,13 @@ extern void set_interactive_phase(struct sched_entity *se, int interactive_phase
 #define VF_BACKGROUND           0x00000002                      /* I have background workloads */
 #define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
 #define VF_BACKGROUND_ON_RQ     (VF_BACKGROUND  << VF_SHIFT)    /* I'm on runq as an background vcpu (only for se's vcpu_flags) */
+
 extern void adjust_vcpu_shares(struct task_struct *p, 
 		unsigned int new_flags, int bg_nice);
 extern int get_interactive_count(int cpu);
 extern int request_boost(struct task_struct *p);
 extern void yield_from_boost(struct task_struct *p);
+extern int vcpu_is_running(struct pid *vcpu_pid, int cpu);
 #endif	/* CONFIG_KVM_VDI */
 
 #endif /* __KERNEL__ */

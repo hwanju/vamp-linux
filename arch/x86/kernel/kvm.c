@@ -173,6 +173,11 @@ static void apf_task_wake_one(struct kvm_task_sleep_node *n)
 	if (!n->mm)
 		return;
 	mmdrop(n->mm);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	kvm_para_set_debug(0, 6);
+	kvm_para_set_debug(1, n->mm ? __pa(n->mm->pgd) : 0);
+	smp_mb();
+#endif
 	if (n->halted)
 		smp_send_reschedule(n->cpu);
 	else if (waitqueue_active(&n->wq))

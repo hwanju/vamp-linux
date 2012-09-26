@@ -65,9 +65,7 @@ struct guest_task_struct {
 	unsigned int pre_monitor_load;
 	unsigned int flags;
 	struct guest_thread_info threads[MAX_GUEST_TASK_VCPU];
-#define MAX_WAKER_TASKS	3
-	struct guest_task_struct *waker_tasks[MAX_WAKER_TASKS];
-	unsigned int audio_count;
+	atomic_t audio_count;
 };
 
 void init_kvm_load_monitor(struct kvm *kvm);

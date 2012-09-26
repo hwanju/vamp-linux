@@ -296,6 +296,9 @@ static struct rcu_node *rcu_get_root(struct rcu_state *rsp)
 
 #ifdef CONFIG_SMP
 
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+#include <linux/kvm_para.h>
+#endif
 /*
  * If the specified CPU is offline, tell the caller that it is in
  * a quiescent state.  Otherwise, whack it with a reschedule IPI.
@@ -322,11 +325,19 @@ static int rcu_implicit_offline_qs(struct rcu_data *rdp)
 	if (rdp->preemptible)
 		return 0;
 
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	preempt_disable();
+	kvm_para_set_debug(0, 1);
+	smp_mb();
+#endif
 	/* The CPU is online, so send it a reschedule IPI. */
 	if (rdp->cpu != smp_processor_id())
 		smp_send_reschedule(rdp->cpu);
 	else
 		set_need_resched();
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	preempt_enable();
+#endif
 	rdp->resched_ipi++;
 	return 0;
 }

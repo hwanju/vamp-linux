@@ -11,6 +11,7 @@
 #include "ioapic.h"
 
 int kvm_get_guest_task(struct kvm_vcpu *vcpu);
+int kvm_set_guest_task(struct kvm_vcpu *vcpu);	/* FIXME: remove */
 int kvm_set_slow_task(struct kvm *kvm);
 
 #define set_guest_thread_state(guest_thread, state_value)     \
@@ -37,7 +38,14 @@ module_param(load_monitor_enabled, uint, S_IRUGO);
 
 /* virtual task that represents interrupt */
 static struct guest_task_struct interrupt_virtual_task;
-#define is_audio_task(gtask)	(gtask->audio_count > 10)	/*FIXME*/
+#define AUDIO_GEN_FLAG		0x80000000
+static inline int is_audio_task(struct kvm *kvm, 
+				struct guest_task_struct *gtask)
+{
+	/* simple policy */
+	return (atomic_read(&gtask->audio_count) & AUDIO_GEN_FLAG) ||
+		gtask == kvm->dominant_audio_task;
+}
 
 /*
  * check_load_epoch() updates load_epoch_id and initializes 
@@ -262,10 +270,6 @@ void check_on_hlt(struct kvm_vcpu *vcpu)
 	 * since no longer cpu is needed */
 	vcpu->prev_run_delay = vcpu->run_delay;
 
-	/* if vcpu goes idle, prev task has no meaning of waker */
-	vcpu->waker_guest_task = NULL;
-	vcpu->remote_waker_guest_task = NULL;
-
 	/* inspect whether the vm has a dedicated system task */
 	if (!vcpu->cur_guest_task)
 		return;
@@ -429,6 +433,10 @@ module_param(load_prof_enabled, int, 0644);
 static unsigned int load_prof_period_msec = DEFAULT_LOAD_PROF_PERIOD_MSEC;
 module_param(load_prof_period_msec, uint, 0644);
 
+#define DEFAULT_REMOTE_WAKEUP_LATENCY_NS	30000   
+static unsigned int remote_wakeup_latency_ns = DEFAULT_REMOTE_WAKEUP_LATENCY_NS;
+module_param(remote_wakeup_latency_ns, uint, 0644);
+
 /* main wrapper for adjusting vcpu's shares */
 static void update_vcpu_shares(struct kvm_vcpu *vcpu, 
 					struct task_struct *task)
@@ -538,7 +546,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 			    iter_gtask->pre_monitor_load > 
 							bg_load_thresh_pct &&
 			    !is_system_task(kvm, iter_gtask) &&
-			    !is_audio_task(iter_gtask)) {
+			    !is_audio_task(kvm, iter_gtask)) {
 				iter_gtask->flags |= VF_BACKGROUND;
 
 				if (sti->nr_tasks < KVM_MAX_SLOW_TASKS) {
@@ -591,8 +599,10 @@ static void clear_gtask_flags(struct kvm *kvm)
 		struct guest_task_struct *iter_gtask;
 		struct hlist_node *node;
 		hlist_for_each_entry(iter_gtask, node, 
-				&kvm->guest_task_hash[bidx], link)
+				&kvm->guest_task_hash[bidx], link) {
 			iter_gtask->flags = 0;
+			atomic_set(&iter_gtask->audio_count, 0);
+		}
 	}
 	spin_unlock(&kvm->guest_task_lock);
 }
@@ -748,6 +758,7 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 				unsigned long long now)
 {
 	kvm_get_guest_task(vcpu);
+	mb();
 	vcpu->cur_guest_task->para_id = vcpu->arch.gt.gtask.task_id;
 	
 	guest_thread->cpu = vcpu->cpu;	/* FIXME: deprecated */
@@ -767,12 +778,19 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 
 	/* vcpu shadows the type of the currently running guest task */
 	update_vcpu_shares(vcpu, current);
+
+	/* FIXME: empirical threshold */
+	if (now - atomic64_read(&vcpu->remote_wake_timestamp) > 
+						remote_wakeup_latency_ns)
+		atomic64_set(&vcpu->remote_waker_gtask, 0);
 }
 
 static void guest_thread_depart(struct kvm_vcpu *vcpu, 
 		struct guest_thread_info *guest_thread, unsigned long long now)
 {
 	long long exec_time = 0;
+	kvm_get_guest_task(vcpu);	/* FIXME: remove later */
+	mb();
 	if (likely(guest_thread->last_arrival)) {
 		exec_time = now - guest_thread->last_arrival;
 		account_cpu_load(vcpu, guest_thread, exec_time, now);
@@ -812,18 +830,16 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
 		prev = &vcpu->cur_guest_task->threads[vcpu->vcpu_id];
 		guest_thread_depart(vcpu, prev, now);
 
-		/* update (likely) waker guest task */
-		if (vcpu->remote_waker_guest_task)
-			vcpu->waker_guest_task = vcpu->remote_waker_guest_task;
-		else if (vcpu->cur_guest_task != guest_task)
-			vcpu->waker_guest_task = vcpu->cur_guest_task;
-
 		/* check if bg->fg scheduling */
 		if (vcpu->cur_guest_task->flags & VF_BACKGROUND &&
 		    !(guest_task->flags & VF_BACKGROUND))
 			current->se.statistics.nr_vcpu_bg2fg_switch++;
 		current->se.statistics.nr_vcpu_task_switch++;
 	}
+	/* update (likely) waker guest task */
+	if (vcpu->cur_guest_task != guest_task)	/* filter TLB flush: switch */
+		atomic64_set(&vcpu->local_waker_gtask, (long long)guest_task);
+
 	/* caching next guest thread as the current one */
 	vcpu->cur_guest_task = guest_task;
 
@@ -855,6 +871,11 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 
 	if (test_and_clear_bit(KVM_REQ_SLOW_TASK, &vcpu->kvm->requests))
 		kvm_set_slow_task(vcpu->kvm);
+
+	/* if a resched IPI is pending */
+	if (atomic64_read(&vcpu->remote_waker_gtask) && 
+	    atomic64_read(&vcpu->remote_wake_timestamp) == 0)
+		atomic64_set(&vcpu->remote_wake_timestamp, now);
 
 	/* run_delay (wait time) accounting */
 	vcpu->run_delay = current->se.statistics.wait_sum;
@@ -1006,27 +1027,51 @@ void request_partial_boost(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu)
 void check_lapic_irq(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu,
 						u32 vector, u32 ipi)
 {
-	if (ipi) {
-		trace_kvm_ipi(src_vcpu, vcpu, vector);
-		if (vector == RESCHEDULE_VECTOR) {
-			if (src_vcpu->remote_waker_guest_task !=
-			    &interrupt_virtual_task)
-				vcpu->remote_waker_guest_task = 
-					src_vcpu->cur_guest_task;
-			else
-				vcpu->remote_waker_guest_task = 
-					&interrupt_virtual_task;
+	if (ipi && vector == RESCHEDULE_VECTOR) {
+		/* if dest vcpu is interrupt context, resched ipi 
+		 * doesn't inherit waker task */
+		if (atomic64_read(&vcpu->local_waker_gtask) !=
+				(long long)&interrupt_virtual_task) {
+			/* for transitive resched IPIs, initial source 
+			 * is forwarded */
+			atomic64_set(&vcpu->local_waker_gtask, 
+				atomic64_read(&src_vcpu->local_waker_gtask));
+			atomic64_set(&vcpu->remote_waker_gtask, 
+				atomic64_read(&src_vcpu->local_waker_gtask));
 
-			request_partial_boost(src_vcpu, vcpu);
+			/* if dest vcpu is currently running, timestamp 
+			 * is set to now, otherwise, zero to update 
+			 * lazily when vcpu is scheduled (vcpu_arrive) 
+			 */
+			if (vcpu_is_running(vcpu->pid, vcpu->cpu))
+				atomic64_set(&vcpu->remote_wake_timestamp,
+					     sched_clock());
+			else
+				atomic64_set(&vcpu->remote_wake_timestamp, 0);
 		}
+		request_partial_boost(src_vcpu, vcpu);
 	}
-	else {	/* non-IPI: local APIC */
-		vcpu->remote_waker_guest_task = &interrupt_virtual_task;
+	else if (!ipi) {	/* non-IPI: local APIC */
+		atomic64_set(&vcpu->local_waker_gtask, 
+			     (long long)&interrupt_virtual_task);
 
 		if (vector == KEYBOARD_LAPIC_VECTOR)
 			request_partial_boost(NULL, vcpu);
 	}
+
+	/* FIXME: for debugging, so remove later */
+	if (ipi) {
+		kvm_get_guest_task(src_vcpu);
+		smp_mb();
+		trace_kvm_ipi(src_vcpu, vcpu, vector);
+		if (vector == RESCHEDULE_VECTOR) {
+			vcpu->arch.gt.gtask.debug[0] = 0;
+			vcpu->arch.gt.gtask.debug64[0] = 0;
+			kvm_set_guest_task(vcpu);
+		}
+	}
 }
+EXPORT_SYMBOL_GPL(check_lapic_irq);
 
 /* VEC_POS & REG_POS are borrowed from arch/x86/kvm/lapic.c */
 #define VEC_POS(v) ((v) & (32 - 1))
@@ -1037,13 +1082,15 @@ static inline int audio_interrupt_context(struct kvm_vcpu *vcpu)
 	return test_bit(VEC_POS(AC97_LAPIC_VECTOR), 
 		(apic->regs + APIC_ISR) + REG_POS(AC97_LAPIC_VECTOR));
 }
+
+/* check synchronous audio access and, if so, remote waker task
+ * is accounted */
 void check_audio_access(struct kvm_vcpu *vcpu)
 {
+	struct kvm *kvm = vcpu->kvm;
 	struct guest_task_struct *audio_task;
-	struct guest_task_struct *waker_task;
+	struct guest_task_struct *rwaker_task, *lwaker_task;
 	unsigned long long now;
-	//int min_idx = 0, min_counter = INT_MAX;
-	//int i, hit = 0;
 
 	if (!is_ac97_ioport(vcpu->arch.pio.port) ||
 	    audio_interrupt_context(vcpu))
@@ -1057,38 +1104,34 @@ void check_audio_access(struct kvm_vcpu *vcpu)
 
 	/* update stat for waker task of audio-generating task */
 	audio_task = vcpu->cur_guest_task;
-	waker_task = vcpu->waker_guest_task;
-	if (unlikely(!audio_task || !waker_task) ||
-	    waker_task == &interrupt_virtual_task)
+	rwaker_task = (struct guest_task_struct *)
+				atomic64_read(&vcpu->remote_waker_gtask);
+	lwaker_task = (struct guest_task_struct *)
+				atomic64_read(&vcpu->local_waker_gtask);
+
+	/* if remote and local wakers are equal, this audio access
+	 * is performed during a slice where a resched ipi is received.
+	 * only consider an audio access of a vcpu woken after the ipi */
+	if (unlikely(!audio_task || !rwaker_task) ||
+	    lwaker_task == rwaker_task ||
+	    lwaker_task == &interrupt_virtual_task ||
+	    rwaker_task == &interrupt_virtual_task)
 		return;
 
-	audio_task->audio_count = 100;	/*FIXME*/
-	waker_task->audio_count++;
-#if 0
+	/* audio count accounting: audio_count is initialized at the end
+	 * of interactive period (it makes audio_count to be an atomic var) */
+	atomic_set(&audio_task->audio_count, AUDIO_GEN_FLAG);
+	atomic_inc(&rwaker_task->audio_count);
+	
+	/* simple policy: for each vm, one dominant remote waker is regarded as
+	 * a multimedia task to be excluded from background workloads */
+	if (!(atomic_read(&rwaker_task->audio_count) & AUDIO_GEN_FLAG) &&
+	    (kvm->dominant_audio_task == NULL ||
+	     atomic_read(&rwaker_task->audio_count) > 
+			atomic_read(&kvm->dominant_audio_task->audio_count)))
+		kvm->dominant_audio_task = rwaker_task;
 
-	/* decide hit or miss */
-	for (i = 0; i < MAX_WAKER_TASKS; i++) {
-		if (audio_task->waker_tasks[i] == waker_task) {
-			hit = 1;	/* nothing to do anymore */
-			break;
-		}
-		if (!audio_task->waker_tasks[i]) {	/* empty slot */
-			min_idx = i;		/* put on the slot if missed */
-			min_counter = 0;	/* do not update further */
-		}
-		else if (audio_task->waker_tasks[i]->audio_count < 
-								min_counter) {
-			min_idx = i;
-			min_counter = audio_task->waker_tasks[i]->audio_count;
-		}
-	}
-	if (!hit) {	/* if missed, evict and place the current waker */
-		if (audio_task->waker_tasks[min_idx])	/* evict */
-			audio_task->waker_tasks[min_idx]->audio_count = 0;
-		audio_task->waker_tasks[min_idx] = waker_task;
-	}
-	trace_kvm_audio_access(vcpu, hit + 1);
-#endif
+	trace_kvm_audio_access(vcpu, 1);
 }
 
 /*

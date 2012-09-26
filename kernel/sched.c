@@ -1201,10 +1201,19 @@ static void resched_task(struct task_struct *p)
 	if (cpu == smp_processor_id())
 		return;
 
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	preempt_disable();
+	kvm_para_set_debug(0, 2);
+	kvm_para_set_debug(1, p->tgid);
+	kvm_para_set_debug(2, p->pid);
+#endif
 	/* NEED_RESCHED must be visible before we test polling */
 	smp_mb();
 	if (!tsk_is_polling(p))
 		smp_send_reschedule(cpu);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	preempt_enable();
+#endif
 }
 
 static void resched_cpu(int cpu)
@@ -1280,10 +1289,17 @@ void wake_up_idle_cpu(int cpu)
 	 */
 	set_tsk_need_resched(rq->idle);
 
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	preempt_disable();
+	kvm_para_set_debug(0, 3);
+#endif
 	/* NEED_RESCHED must be visible before we test polling */
 	smp_mb();
 	if (!tsk_is_polling(rq->idle))
 		smp_send_reschedule(cpu);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	preempt_enable();
+#endif
 }
 
 #endif /* CONFIG_NO_HZ */
@@ -2382,6 +2398,12 @@ void kick_process(struct task_struct *p)
 
 	preempt_disable();
 	cpu = task_cpu(p);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	kvm_para_set_debug(0, 4);
+	kvm_para_set_debug(1, p->tgid);
+	kvm_para_set_debug(2, p->pid);
+	smp_mb();
+#endif
 	if ((cpu != smp_processor_id()) && task_curr(p))
 		smp_send_reschedule(cpu);
 	preempt_enable();
@@ -2601,6 +2623,11 @@ void scheduler_ipi(void)
 	struct rq *rq = this_rq();
 	struct task_struct *list = xchg(&rq->wake_list, NULL);
 
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	kvm_para_set_debug(3, list ? list->tgid : -1);
+	kvm_para_set_debug(4, list ? list->pid : -1);
+	smp_mb();
+#endif
 	if (!list)
 		return;
 
@@ -2635,9 +2662,19 @@ static void ttwu_queue_remote(struct task_struct *p, int cpu)
 		if (next == old)
 			break;
 	}
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	preempt_disable();
+	kvm_para_set_debug(0, 5);
+	kvm_para_set_debug(1, p->tgid);
+	kvm_para_set_debug(2, p->pid);
+	smp_mb();
+#endif
 
 	if (!next)
 		smp_send_reschedule(cpu);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	preempt_enable();
+#endif
 }
 
 #ifdef __ARCH_WANT_INTERRUPTS_ON_CTXSW
@@ -3180,11 +3217,9 @@ context_switch(struct rq *rq, struct task_struct *prev,
 		next->active_mm = oldmm;
 		atomic_inc(&oldmm->mm_count);
 		enter_lazy_tlb(oldmm, next);
-#if 0
 #ifdef CONFIG_KVM_VDI	/* guest-side */
-		/* to track kernel thread */
-		kvm_para_set_task(next->tgid, next->comm, __pa(oldmm->pgd));
-#endif
+		/* to track kernel thread: only name for debugging */
+		kvm_para_set_taskname(next->comm);
 #endif
 	} else
 		switch_mm(oldmm, mm, next);
@@ -9440,5 +9475,10 @@ void yield_from_boost(struct task_struct *p)
 	resched_cpu(smp_processor_id());
 }
 EXPORT_SYMBOL_GPL(yield_from_boost);
-#endif
 
+int vcpu_is_running(struct pid *vcpu_pid, int cpu)
+{
+	return cpu >= 0 ? vcpu_pid == curr_task(cpu)->pids[PIDTYPE_PID].pid : 0;
+}
+EXPORT_SYMBOL_GPL(vcpu_is_running);
+#endif
