@@ -1033,7 +1033,7 @@ static int kvm_apic_local_deliver(struct kvm_lapic *apic, int lvt_type)
 		mode = reg & APIC_MODE_MASK;
 		trig_mode = reg & APIC_LVT_LEVEL_TRIGGER;
 #ifdef CONFIG_KVM_VDI
-		check_lapic_irq(NULL, apic->vcpu, vector, 0);
+		check_lapic_irq(NULL, apic->vcpu, vector, 0);	/* timer, nmi */
 #endif
 		return __apic_accept_irq(apic, mode, vector, 1, trig_mode);
 	}

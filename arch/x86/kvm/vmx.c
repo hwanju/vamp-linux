@@ -3075,6 +3075,9 @@ static void vmx_inject_irq(struct kvm_vcpu *vcpu)
 		intr |= INTR_TYPE_EXT_INTR;
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, intr);
 	vmx_clear_hlt(vcpu);
+#ifdef CONFIG_KVM_VDI
+	check_injected_irq(vcpu, irq);
+#endif
 }
 
 static void vmx_inject_nmi(struct kvm_vcpu *vcpu)
@@ -3586,9 +3589,6 @@ static int handle_interrupt_window(struct kvm_vcpu *vcpu)
 	vmcs_write32(CPU_BASED_VM_EXEC_CONTROL, cpu_based_vm_exec_control);
 
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
-#ifdef CONFIG_KVM_VDI
-	check_lapic_irq(NULL, vcpu, 0, 0);	/* FIXME: must verify it */
-#endif
 
 	++vcpu->stat.irq_window_exits;
 
