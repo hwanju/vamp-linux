@@ -785,13 +785,17 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 	/* vcpu shadows the type of the currently running guest task */
 	update_vcpu_shares(vcpu, current);
 
-	/* update remote wake-up */
-	if (now - atomic64_read(&vcpu->remote_wake_timestamp) >	/* expired */
-						remote_wakeup_latency_ns)
-		atomic64_set(&vcpu->remote_waker_gtask, 0);
-	else if (is_normal_gtask(vcpu->remote_waker_gtask))	/* valid */
-		atomic64_set(&vcpu->local_waker_gtask,	/* local = remote */
+	if (atomic64_read(&vcpu->remote_waker_gtask) &&		/* woken */
+	    atomic64_read(&vcpu->remote_wake_timestamp)) {	/* injected */
+		/* if expired, remote_waker_gtask is set to NULL */
+		if (now - atomic64_read(&vcpu->remote_wake_timestamp) >
+				remote_wakeup_latency_ns)
+			atomic64_set(&vcpu->remote_waker_gtask, 0);
+		/* otherwise, 'local = remote' for transitive IPIs */
+		else if (is_normal_gtask(vcpu->remote_waker_gtask))
+			atomic64_set(&vcpu->local_waker_gtask,
 				atomic64_read(&vcpu->remote_waker_gtask));
+	}
 }
 
 static void guest_thread_depart(struct kvm_vcpu *vcpu, 
@@ -834,7 +838,7 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
 	}
 	now = sched_clock();
 	/* FIXME: possible race - should be handled with guest task deletion */
-	if (vcpu->cur_guest_task) {
+	if (likely(vcpu->cur_guest_task)) {
 		/* accounting for departing */
 		prev = &vcpu->cur_guest_task->threads[vcpu->vcpu_id];
 		guest_thread_depart(vcpu, prev, now);
@@ -845,9 +849,12 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
 			current->se.statistics.nr_vcpu_bg2fg_switch++;
 		current->se.statistics.nr_vcpu_task_switch++;
 	}
-	/* update (likely) waker guest task */
-	if (vcpu->cur_guest_task != guest_task)	/* filter TLB flush: switch */
+	if (vcpu->cur_guest_task != guest_task) {	/* filter TLB flush */
+		if (unlikely(atomic64_read(&vcpu->local_waker_gtask) ==
+			     atomic64_read(&vcpu->remote_waker_gtask)))
+			atomic64_set(&vcpu->remote_waker_gtask, 0);
 		atomic64_set(&vcpu->local_waker_gtask, (long long)guest_task);
+	}
 
 	/* caching next guest thread as the current one */
 	vcpu->cur_guest_task = guest_task;
@@ -890,6 +897,9 @@ static void vcpu_arrive(struct preempt_notifier *pn, int cpu)
 	cur_guest_thread = get_cur_guest_thread(vcpu);
 	if (unlikely(!cur_guest_thread))
 		return;
+
+	atomic64_set(&vcpu->local_waker_gtask, (long long)vcpu->cur_guest_task);
+
 	trace_kvm_vcpu_switch_arrive(vcpu, current, vcpu->run_delay);
 	guest_thread_arrive(vcpu, cur_guest_thread, now);
 }
