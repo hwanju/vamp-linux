@@ -1483,18 +1483,6 @@ int kvm_get_guest_task(struct kvm_vcpu *vcpu)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_get_guest_task);
-int kvm_set_guest_task(struct kvm_vcpu *vcpu)	/*FIXME: remove */
-{
-	if (!(vcpu->arch.gt.msr_val & KVM_MSR_ENABLED))
-		return -EPERM;
-
-	if (unlikely(kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.gt.gtask_cache,
-					&vcpu->arch.gt.gtask, 
-					sizeof(struct kvm_guest_task))))
-		return -EFAULT;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(kvm_set_guest_task);
 int kvm_set_slow_task(struct kvm *kvm)
 {
 	if (!(kvm->arch.sti.msr_val & KVM_MSR_ENABLED))
@@ -1507,6 +1495,20 @@ int kvm_set_slow_task(struct kvm *kvm)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_set_slow_task);
+#ifdef CONFIG_KVM_VDI_DEBUG
+int kvm_set_guest_task(struct kvm_vcpu *vcpu)
+{
+	if (!(vcpu->arch.gt.msr_val & KVM_MSR_ENABLED))
+		return -EPERM;
+
+	if (unlikely(kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.gt.gtask_cache,
+					&vcpu->arch.gt.gtask, 
+					sizeof(struct kvm_guest_task))))
+		return -EFAULT;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(kvm_set_guest_task);
+#endif
 #endif
 
 int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data)

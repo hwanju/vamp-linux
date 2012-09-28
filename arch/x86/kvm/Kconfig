@@ -80,6 +80,14 @@ config KVM_VDI
           Provides support for virtual desktop scheduling for KVM.
           Basically tracking guest-side process switching for interactive multi-core scheduling.
 
+config KVM_VDI_DEBUG
+	bool "Debugging for virtual desktop scheduling"
+	depends on KVM && KVM_VDI
+	default n
+	---help---
+	  Debugging for virtual desktop scheduling for KVM. Mostly for remote wakeup debugging
+	  via shared memory between guest Linux and host KVM.
+
 # OK, it's a little counter-intuitive to do this, but it puts it neatly under
 # the virtualization menu.
 source drivers/vhost/Kconfig

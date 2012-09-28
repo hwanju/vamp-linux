@@ -54,7 +54,7 @@
  * since the following depends on task-aware agent */
 #ifdef CONFIG_KVM_VDI
 /* TODO: changed into module parameter */ 
-#define LOAD_ENTRIES_SHIFT              4
+#define LOAD_ENTRIES_SHIFT              5
 #define NR_LOAD_ENTRIES                 (1<<LOAD_ENTRIES_SHIFT)   
 #endif
 

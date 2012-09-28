@@ -138,7 +138,7 @@ static inline void play_dead(void)
 #endif
 static inline void smp_send_reschedule(int cpu)
 {
-#ifdef CONFIG_KVM_VDI	/* guest-side */
+#ifdef CONFIG_KVM_VDI_DEBUG	/* guest-side */
 	kvm_para_set_debug64(0, _RET_IP_);
 #endif
 	smp_ops.smp_send_reschedule(cpu);

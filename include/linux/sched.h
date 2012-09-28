@@ -2729,6 +2729,7 @@ extern void set_interactive_phase(struct sched_entity *se, int interactive_phase
 #define VF_BACKGROUND           0x00000002                      /* I have background workloads */
 #define VF_INTERACTIVE_ON_RQ    (VF_INTERACTIVE << VF_SHIFT)    /* I'm on runq as an interactive vcpu (only for se's vcpu_flags) */
 #define VF_BACKGROUND_ON_RQ     (VF_BACKGROUND  << VF_SHIFT)    /* I'm on runq as an background vcpu (only for se's vcpu_flags) */
+#define VF_NO_LWAKER_UPDATE	0x80000000			/* skip local waker update at task arrival */
 
 extern void adjust_vcpu_shares(struct task_struct *p, 
 		unsigned int new_flags, int bg_nice);

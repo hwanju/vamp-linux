@@ -325,19 +325,14 @@ static int rcu_implicit_offline_qs(struct rcu_data *rdp)
 	if (rdp->preemptible)
 		return 0;
 
-#ifdef CONFIG_KVM_VDI	/* guest-side */
-	preempt_disable();
+#ifdef CONFIG_KVM_VDI_DEBUG	/* guest-side */
 	kvm_para_set_debug(0, 1);
-	smp_mb();
 #endif
 	/* The CPU is online, so send it a reschedule IPI. */
 	if (rdp->cpu != smp_processor_id())
 		smp_send_reschedule(rdp->cpu);
 	else
 		set_need_resched();
-#ifdef CONFIG_KVM_VDI	/* guest-side */
-	preempt_enable();
-#endif
 	rdp->resched_ipi++;
 	return 0;
 }

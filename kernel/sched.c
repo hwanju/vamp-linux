@@ -1201,8 +1201,7 @@ static void resched_task(struct task_struct *p)
 	if (cpu == smp_processor_id())
 		return;
 
-#ifdef CONFIG_KVM_VDI	/* guest-side */
-	preempt_disable();
+#ifdef CONFIG_KVM_VDI_DEBUG	/* guest-side */
 	kvm_para_set_debug(0, 2);
 	kvm_para_set_debug(1, p->tgid);
 	kvm_para_set_debug(2, p->pid);
@@ -1211,9 +1210,6 @@ static void resched_task(struct task_struct *p)
 	smp_mb();
 	if (!tsk_is_polling(p))
 		smp_send_reschedule(cpu);
-#ifdef CONFIG_KVM_VDI	/* guest-side */
-	preempt_enable();
-#endif
 }
 
 static void resched_cpu(int cpu)
@@ -1289,17 +1285,13 @@ void wake_up_idle_cpu(int cpu)
 	 */
 	set_tsk_need_resched(rq->idle);
 
-#ifdef CONFIG_KVM_VDI	/* guest-side */
-	preempt_disable();
+#ifdef CONFIG_KVM_VDI_DEBUG	/* guest-side */
 	kvm_para_set_debug(0, 3);
 #endif
 	/* NEED_RESCHED must be visible before we test polling */
 	smp_mb();
 	if (!tsk_is_polling(rq->idle))
 		smp_send_reschedule(cpu);
-#ifdef CONFIG_KVM_VDI	/* guest-side */
-	preempt_enable();
-#endif
 }
 
 #endif /* CONFIG_NO_HZ */
@@ -2398,11 +2390,10 @@ void kick_process(struct task_struct *p)
 
 	preempt_disable();
 	cpu = task_cpu(p);
-#ifdef CONFIG_KVM_VDI	/* guest-side */
+#ifdef CONFIG_KVM_VDI_DEBUG	/* guest-side */
 	kvm_para_set_debug(0, 4);
 	kvm_para_set_debug(1, p->tgid);
 	kvm_para_set_debug(2, p->pid);
-	smp_mb();
 #endif
 	if ((cpu != smp_processor_id()) && task_curr(p))
 		smp_send_reschedule(cpu);
@@ -2623,10 +2614,9 @@ void scheduler_ipi(void)
 	struct rq *rq = this_rq();
 	struct task_struct *list = xchg(&rq->wake_list, NULL);
 
-#ifdef CONFIG_KVM_VDI	/* guest-side */
+#ifdef CONFIG_KVM_VDI_DEBUG	/* guest-side */
 	kvm_para_set_debug(3, list ? list->tgid : -1);
 	kvm_para_set_debug(4, list ? list->pid : -1);
-	smp_mb();
 #endif
 	if (!list)
 		return;
@@ -2662,19 +2652,14 @@ static void ttwu_queue_remote(struct task_struct *p, int cpu)
 		if (next == old)
 			break;
 	}
-#ifdef CONFIG_KVM_VDI	/* guest-side */
-	preempt_disable();
+#ifdef CONFIG_KVM_VDI_DEBUG	/* guest-side */
 	kvm_para_set_debug(0, 5);
 	kvm_para_set_debug(1, p->tgid);
 	kvm_para_set_debug(2, p->pid);
-	smp_mb();
 #endif
 
 	if (!next)
 		smp_send_reschedule(cpu);
-#ifdef CONFIG_KVM_VDI	/* guest-side */
-	preempt_enable();
-#endif
 }
 
 #ifdef __ARCH_WANT_INTERRUPTS_ON_CTXSW

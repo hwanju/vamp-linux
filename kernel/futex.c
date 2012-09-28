@@ -1857,6 +1857,10 @@ retry:
 	if (ret)
 		goto out;
 
+#ifdef CONFIG_KVM_VDI
+	if (current->se.is_vcpu)
+		current->se.vcpu_flags |= VF_NO_LWAKER_UPDATE;
+#endif
 	/* queue_me and wait for wakeup, timeout, or a signal. */
 	futex_wait_queue_me(hb, &q, to);
 
