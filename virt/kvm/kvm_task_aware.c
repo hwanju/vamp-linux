@@ -24,7 +24,7 @@ int kvm_set_guest_task(struct kvm_vcpu *vcpu);
 
 #define get_bg_vcpu_nice(vcpu)  \
 	(sysctl_kvm_vamp <= 19 ? sysctl_kvm_vamp: \
-	 vcpu->bg_exec_time * (sysctl_kvm_vamp - 19) / (vcpu->exec_time + 1))
+	 (vcpu->bg_exec_time + 1) * (sysctl_kvm_vamp - 19) / (vcpu->exec_time + 1))
 
 #define KVM_TA_DEBUG
 
@@ -445,6 +445,15 @@ module_param(load_prof_period_msec, uint, 0644);
 static unsigned int remote_wakeup_latency_ns = DEFAULT_REMOTE_WAKEUP_LATENCY_NS;
 module_param(remote_wakeup_latency_ns, uint, 0644);
 
+static unsigned int second_chance_to_bg;
+module_param(second_chance_to_bg, uint, 0644);
+
+#define RW_INTERRUPT_RESET	0x1
+#define RW_TRANSITIVE_SET	0x2
+static unsigned int remote_wakeup_track_mode = 
+		RW_INTERRUPT_RESET | RW_TRANSITIVE_SET;
+module_param(remote_wakeup_track_mode, uint, 0644);
+
 /* main wrapper for adjusting vcpu's shares */
 static void update_vcpu_shares(struct kvm_vcpu *vcpu, 
 					struct task_struct *task)
@@ -594,6 +603,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 			if (!task || !vcpu->cur_guest_task)
 				continue;
 
+			vcpu->exec_time = vcpu->bg_exec_time = 0;	/*FIXME*/
 			update_vcpu_shares(vcpu, task);
 			put_task_struct(task);
 		}
@@ -766,7 +776,6 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 				unsigned long long now)
 {
 	kvm_get_guest_task(vcpu);
-	mb();
 	vcpu->cur_guest_task->para_id = vcpu->arch.gt.gtask.task_id;
 	
 	guest_thread->cpu = vcpu->cpu;	/* FIXME: deprecated */
@@ -795,7 +804,8 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 				remote_wakeup_latency_ns)
 			atomic64_set(&vcpu->remote_waker_gtask, 0);
 		/* otherwise, 'local = remote' for transitive IPIs */
-		else if (is_normal_gtask(vcpu->remote_waker_gtask))
+		else if (remote_wakeup_track_mode & RW_TRANSITIVE_SET &&
+			 is_normal_gtask(vcpu->remote_waker_gtask))
 			atomic64_set(&vcpu->local_waker_gtask,
 				atomic64_read(&vcpu->remote_waker_gtask));
 	}
@@ -1107,11 +1117,13 @@ void check_injected_irq(struct kvm_vcpu *vcpu, int vector)
 					sched_clock());
 		return;
 	}
-	/* interrupts other than major IPIs */
-	atomic64_set(&vcpu->local_waker_gtask, 
-			(long long)&interrupt_virtual_task);
-	/* invalidate rwaker on an interrupt */
-	atomic64_set(&vcpu->remote_waker_gtask, 0);
+	if (remote_wakeup_track_mode & RW_INTERRUPT_RESET) {
+		/* interrupts other than major IPIs */
+		atomic64_set(&vcpu->local_waker_gtask, 
+				(long long)&interrupt_virtual_task);
+		/* invalidate rwaker on an interrupt */
+		atomic64_set(&vcpu->remote_waker_gtask, 0);
+	}
 }
 EXPORT_SYMBOL_GPL(check_injected_irq);
 

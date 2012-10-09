@@ -2688,7 +2688,13 @@ static void ttwu_queue(struct task_struct *p, int cpu)
 
 #if defined(CONFIG_SMP)
 	if (sched_feat(TTWU_QUEUE) && cpu != smp_processor_id()) {
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+		/* sync clocks x-cpu & store the clock as wake start */
+		schedstat_set(p->se.statistics.remote_wake_start,
+			       sched_clock_cpu(cpu));
+#else	/* original code */
 		sched_clock_cpu(cpu); /* sync clocks x-cpu */
+#endif
 		ttwu_queue_remote(p, cpu);
 		return;
 	}

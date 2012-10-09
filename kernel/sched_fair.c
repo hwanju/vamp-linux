@@ -645,6 +645,25 @@ static inline void
 update_stats_wait_start(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	schedstat_set(se->statistics.wait_start, rq_of(cfs_rq)->clock);
+#ifdef CONFIG_KVM_VDI	/* guest-side */
+	if (se->statistics.remote_wake_start) {
+		s64 wake_latency = 
+			rq_of(cfs_rq)->clock - se->statistics.remote_wake_start;
+		if (wake_latency < 0) {
+			//printk(KERN_WARNING "Warning: wake_latency (%Ld) < 0\n",
+			//		wake_latency);
+			wake_latency = 0;
+		}
+		schedstat_set(se->statistics.remote_wake_max, 
+			max(se->statistics.remote_wake_max, (u64)wake_latency));
+		schedstat_set(se->statistics.remote_wake_count, 
+			se->statistics.remote_wake_count + 1);
+		schedstat_set(se->statistics.remote_wake_sum, 
+			se->statistics.remote_wake_sum + wake_latency);
+
+		schedstat_set(se->statistics.remote_wake_start, 0);
+	}
+#endif
 }
 
 /*
@@ -675,6 +694,10 @@ update_stats_wait_end(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	}
 #endif
 	schedstat_set(se->statistics.wait_start, 0);
+#ifdef CONFIG_KVM_VDI
+	/* enqueued in wake_list and then rq, but migrated, reset */
+	schedstat_set(se->statistics.remote_wake_start, 0);
+#endif
 }
 
 static inline void

@@ -462,6 +462,9 @@ void proc_sched_show_task(struct task_struct *p, struct seq_file *m)
 	P(se.statistics.nr_wakeups_passive);
 	P(se.statistics.nr_wakeups_idle);
 #ifdef CONFIG_KVM_VDI
+	PN(se.statistics.remote_wake_max);
+	PN(se.statistics.remote_wake_sum);
+	P(se.statistics.remote_wake_count);
 	P(se.statistics.nr_vcpu_task_switch);
 	P(se.statistics.nr_vcpu_bg2fg_switch);
 #endif
