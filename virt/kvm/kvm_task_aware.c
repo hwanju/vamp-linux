@@ -445,9 +445,6 @@ module_param(load_prof_period_msec, uint, 0644);
 static unsigned int remote_wakeup_latency_ns = DEFAULT_REMOTE_WAKEUP_LATENCY_NS;
 module_param(remote_wakeup_latency_ns, uint, 0644);
 
-static unsigned int second_chance_to_bg;
-module_param(second_chance_to_bg, uint, 0644);
-
 #define RW_INTERRUPT_RESET	0x1
 #define RW_TRANSITIVE_SET	0x2
 static unsigned int remote_wakeup_track_mode = 
@@ -603,7 +600,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 			if (!task || !vcpu->cur_guest_task)
 				continue;
 
-			vcpu->exec_time = vcpu->bg_exec_time = 0;	/*FIXME*/
+			vcpu->exec_time = vcpu->bg_exec_time = 0;
 			update_vcpu_shares(vcpu, task);
 			put_task_struct(task);
 		}
