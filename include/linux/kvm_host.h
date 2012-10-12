@@ -192,6 +192,7 @@ struct kvm_vcpu {
 	atomic64_t local_waker_gtask;
 	atomic64_t remote_waker_gtask;
 	atomic64_t remote_wake_timestamp;
+	u8 remote_waker_valid;
 #endif
 
 	struct kvm_vcpu_arch arch;
@@ -338,7 +339,8 @@ struct kvm {
 	pid_t vm_id;    /* for tracing (non-mandatory) */
 #define KVM_REQ_SLOW_TASK	0
 	unsigned long requests;
-	struct guest_task_struct *dominant_audio_task;	/* simple policy */
+	struct guest_task_struct *dominant_audio_task;	/* sound client */
+	struct kvm_vcpu *last_audio_vcpu;
 #endif
 };
 

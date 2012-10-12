@@ -115,7 +115,7 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 	}
 #ifdef CONFIG_KVM_VDI
 	if (lowest) {
-		check_lapic_irq(src ? src->vcpu : NULL, lowest, 
+		lowest = check_lapic_irq(src ? src->vcpu : NULL, lowest, 
 						irq->vector, irq->ipi);
 		r = kvm_apic_set_irq(lowest, irq);
 	}

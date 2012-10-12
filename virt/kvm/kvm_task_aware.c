@@ -35,22 +35,75 @@ int kvm_set_guest_task(struct kvm_vcpu *vcpu);
 #endif
 
 /* read-only: not updatable during runtime */
-static unsigned int __read_mostly load_monitor_enabled = 1;
-module_param(load_monitor_enabled, uint, S_IRUGO);      
+static int __read_mostly load_monitor_enabled = 1;
+module_param(load_monitor_enabled, bool, S_IRUGO | S_IWUSR);
+
+#define valid_vcpu_load(vcpu , timestamp)  \
+	(vcpu->load_epoch_id >= load_epoch_id(timestamp) || \
+	 vcpu->state == VCPU_RUNNING)
+
+#define valid_gthread_load(gthread, timestamp)  \
+	(gthread->load_epoch_id >= load_epoch_id(timestamp) || \
+	 gthread->state == GUEST_THREAD_RUNNING)
+
+#define valid_gtask_load(gtask, timestamp)  \
+	(atomic64_read(&gtask->last_arrival) >= timestamp)
+
+#define RWT_BASE		0x1
+#define RWT_INTERRUPT_RESET	0x2
+#define RWT_TRANSITIVE_SET	0x4
+#define RWT_WEIGHTED_AUDIO_CNT	0x8
+static unsigned int remote_wakeup_track_mode = 
+		RWT_BASE | RWT_INTERRUPT_RESET | 
+		RWT_TRANSITIVE_SET | RWT_WEIGHTED_AUDIO_CNT;
+module_param(remote_wakeup_track_mode, uint, 0644);
+
+static int __read_mostly audio_intr_redirect = 1;
+module_param(audio_intr_redirect, bool, S_IRUGO | S_IWUSR);
 
 /* virtual task that represents interrupt */
 static struct guest_task_struct interrupt_virtual_task;
 #define AUDIO_GEN_FLAG		0x40000000
+static void update_audio_count(struct kvm *kvm, struct guest_task_struct *gtask)
+{
+	int audio_count = atomic_read(&gtask->audio_count);
+
+	if (!remote_wakeup_track_mode ||
+	    audio_count & AUDIO_GEN_FLAG)
+		return;
+
+	/* weighting audio count by background confidence */
+	if (remote_wakeup_track_mode & RWT_WEIGHTED_AUDIO_CNT && gtask->bg_conf)
+		audio_count /= gtask->bg_conf;
+	/* Exponential moving average: equal weight */
+	gtask->audio_avg = (gtask->audio_avg >> 1) + (audio_count >> 1);
+
+	/* simple policy: for each vm, one dominant remote waker is regarded as
+	 * a multimedia task to be excluded from background workloads */
+	if (kvm->dominant_audio_task == NULL ||
+	    gtask->audio_avg > kvm->dominant_audio_task->audio_avg)
+		kvm->dominant_audio_task = gtask;
+}
+static inline void reset_audio_count(struct guest_task_struct *gtask)
+{
+	atomic_set(&gtask->audio_count, 0);
+}
 static inline int is_audio_task(struct kvm *kvm, 
 				struct guest_task_struct *gtask)
 {
+	if (!remote_wakeup_track_mode)
+		return 0;
 	/* simple policy */
 	return (atomic_read(&gtask->audio_count) & AUDIO_GEN_FLAG) ||
 		gtask == kvm->dominant_audio_task;
 }
-static inline int is_normal_gtask(atomic64_t gtask)
+static inline struct guest_task_struct *get_gtask(atomic64_t *gtask)
 {
-	long long gtask_addr = atomic64_read(&gtask);
+	return (struct guest_task_struct *)atomic64_read(gtask);
+}
+static inline int is_normal_gtask(atomic64_t *gtask)
+{
+	long long gtask_addr = atomic64_read(gtask);
 
 	return gtask_addr && gtask_addr != (long long)&interrupt_virtual_task;
 }
@@ -150,14 +203,6 @@ static inline void account_cpu_load(struct kvm_vcpu *vcpu,
 	/* At this time, invariant is vcpu->load_epoch_id == 
 	 * guest_thread->load_epoch_id == cur_load_epoch_id */
 }
-
-#define valid_vcpu_load(vcpu , timestamp)  \
-	(vcpu->load_epoch_id >= load_epoch_id(timestamp) || \
-	 vcpu->state == VCPU_RUNNING)
-
-#define valid_gthread_load(gthread, timestamp)  \
-	(gthread->load_epoch_id >= load_epoch_id(timestamp) || \
-	 gthread->state == GUEST_THREAD_RUNNING)
 
 static struct kmem_cache *guest_task_cache;
 static __read_mostly struct preempt_ops acct_preempt_ops;
@@ -445,12 +490,6 @@ module_param(load_prof_period_msec, uint, 0644);
 static unsigned int remote_wakeup_latency_ns = DEFAULT_REMOTE_WAKEUP_LATENCY_NS;
 module_param(remote_wakeup_latency_ns, uint, 0644);
 
-#define RW_INTERRUPT_RESET	0x1
-#define RW_TRANSITIVE_SET	0x2
-static unsigned int remote_wakeup_track_mode = 
-		RW_INTERRUPT_RESET | RW_TRANSITIVE_SET;
-module_param(remote_wakeup_track_mode, uint, 0644);
-
 /* main wrapper for adjusting vcpu's shares */
 static void update_vcpu_shares(struct kvm_vcpu *vcpu, 
 					struct task_struct *task)
@@ -471,16 +510,20 @@ static void update_vcpu_shares(struct kvm_vcpu *vcpu,
  * pre_monitor_duration: the duration (in ns) kept as previous load history 
  */
 static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now, 
-		unsigned long long pre_monitor_duration)
+		unsigned long long pre_monitor_duration, int output)
 {
 	struct kvm_vcpu *vcpu = NULL;
-	int vidx, bidx;
+	int bidx;
 	/* an epoch after now is the beginning point of pre-monitoring period */
 	unsigned int prev_start_load_idx = load_idx(load_epoch_id(now) + 1);
 	unsigned int prev_end_load_idx = load_idx_by_time(now);
 	/* timestamp of the beginning point of pre-monitoring period */
 	unsigned long long pre_monitor_timestamp = now - pre_monitor_duration;
 	unsigned int vm_load = 0;       /* for debugging */
+	/* used for gtask iteration */
+	struct guest_task_struct *iter_gtask;
+	struct hlist_node *node;
+	int vcpu_id;
 
 	/* for paravirt */
 	struct kvm_slow_task_info *sti = &kvm->arch.sti.stask_info;
@@ -490,7 +533,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 
 	/* scan vcpu loads for pre-monitoring period */
 	kvm->pre_monitor_load = 0;
-	kvm_for_each_vcpu(vidx, vcpu, kvm) {
+	kvm_for_each_vcpu(vcpu_id, vcpu, kvm) {
 		/* reset previous run delay */
 		vcpu->prev_run_delay = vcpu->run_delay; 
 
@@ -516,13 +559,22 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 
 	/* scan gtask loads for pre-monitoring period */
 	spin_lock(&kvm->guest_task_lock);
+	/* if output-driven check, pre-iterate to update avg audio count */
+	if (output) {
+		/* init first, will be updated in update_audio_count */
+		kvm->dominant_audio_task = NULL;
+		for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
+			hlist_for_each_entry(iter_gtask, node, 
+					&kvm->guest_task_hash[bidx], link) 
+				if (valid_gtask_load(iter_gtask, 
+				    pre_monitor_timestamp))
+					update_audio_count(kvm, iter_gtask);
+		}
+	}
 	sti->nr_tasks = 0;
 	for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
-		struct guest_task_struct *iter_gtask;
-		struct hlist_node *node;
 		hlist_for_each_entry(iter_gtask, node, 
 				&kvm->guest_task_hash[bidx], link) {
-			int vcpu_id;
 			int valid_load_task = 0;
 
 			/* scan gthread load for each vcpu for 
@@ -536,7 +588,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 
 				/* we are interested in threads that have been 
 				 * scheduled since load timer started */
-				if (!vcpu || 
+				if (unlikely(!vcpu) || 
 				    !valid_gthread_load(guest_thread, 
 							pre_monitor_timestamp))
 					continue;
@@ -562,6 +614,8 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 			    !is_system_task(kvm, iter_gtask) &&
 			    !is_audio_task(kvm, iter_gtask)) {
 				iter_gtask->flags |= VF_BACKGROUND;
+				if (iter_gtask->bg_conf < MAX_BG_CONF)
+					iter_gtask->bg_conf++;
 
 				if (sti->nr_tasks < KVM_MAX_SLOW_TASKS) {
 					sti->tasks[sti->nr_tasks].task_id = 
@@ -571,13 +625,14 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 					sti->nr_tasks++;
 				}
 			}
+			else if (iter_gtask->bg_conf > 0)
+				iter_gtask->bg_conf--;
 			if (valid_load_task)
 				trace_kvm_gtask_stat(kvm, iter_gtask, 
 						bg_load_thresh_pct,
 						iter_gtask->pre_monitor_load);
-			/* halving audio count after checking */
-			atomic_set(&iter_gtask->audio_count, 
-				   atomic_read(&iter_gtask->audio_count) >> 1);
+			/* reset audio count after checking (trace as well) */
+			reset_audio_count(iter_gtask);
 		}
 	}
 	set_bit(KVM_REQ_SLOW_TASK, &kvm->requests);
@@ -588,7 +643,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 
 	/* promptly adjust vCPU shares if mixed workloads */
 	if (kvm->interactive_phase == MIXED_INTERACTIVE_PHASE) {
-		kvm_for_each_vcpu(vidx, vcpu, kvm) {
+		kvm_for_each_vcpu(vcpu_id, vcpu, kvm) {
 			struct task_struct *task = NULL;
 			struct pid *pid;
 
@@ -629,6 +684,7 @@ static void finish_interactive_period(struct kvm *kvm)
 	clear_gtask_flags(kvm);
 
 	kvm->arch.sti.stask_info.nr_tasks = 0;
+	kvm->last_audio_vcpu = NULL;
 	set_bit(KVM_REQ_SLOW_TASK, &kvm->requests);
 }
 
@@ -773,10 +829,14 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 				unsigned long long now)
 {
 	kvm_get_guest_task(vcpu);
+
 	vcpu->cur_guest_task->para_id = vcpu->arch.gt.gtask.task_id;
+	memcpy(vcpu->cur_guest_task->name, vcpu->arch.gt.gtask.task_name, 
+			TASK_COMM_LEN);	/* for debugging via trace */
 	
-	guest_thread->cpu = vcpu->cpu;	/* FIXME: deprecated */
 	guest_thread->last_arrival = now;
+	atomic64_set(&vcpu->cur_guest_task->last_arrival, now);
+
 	check_load_epoch(vcpu, guest_thread, now);
 
 	if (vcpu->kvm->interactive_phase == NORMAL_PHASE) {
@@ -789,22 +849,26 @@ static void guest_thread_arrive(struct kvm_vcpu *vcpu,
 	if (unlikely(current->se.vcpu_flags & VF_NO_LWAKER_UPDATE))
 		current->se.vcpu_flags &= ~VF_NO_LWAKER_UPDATE;
 	else
-		/* lwaker = arriving task */
+		/* rwt: S_V = T */
 		atomic64_set(&vcpu->local_waker_gtask, 
 				(long long)vcpu->cur_guest_task);
 
 	/* valid check for remote wakeup */
 	if (atomic64_read(&vcpu->remote_waker_gtask) &&		/* woken */
 	    atomic64_read(&vcpu->remote_wake_timestamp)) {	/* injected */
-		/* if expired, remote_waker_gtask is set to NULL */
-		if (now - atomic64_read(&vcpu->remote_wake_timestamp) >
-				remote_wakeup_latency_ns)
+		/* if within wakeup-latency(rwt: t < WL), valid remote waker */ 
+		if (now - atomic64_read(&vcpu->remote_wake_timestamp) <= 
+				remote_wakeup_latency_ns) {
+			vcpu->remote_waker_valid = 1;
+			/* rwt: S_V = RW_V for transitive IPIs */
+			if (remote_wakeup_track_mode & RWT_TRANSITIVE_SET &&
+			    is_normal_gtask(&vcpu->remote_waker_gtask))
+				atomic64_set(&vcpu->local_waker_gtask,
+				    atomic64_read(&vcpu->remote_waker_gtask));
+		}
+		/* otherwise, remote_waker_gtask is set to NULL */
+		else 
 			atomic64_set(&vcpu->remote_waker_gtask, 0);
-		/* otherwise, 'local = remote' for transitive IPIs */
-		else if (remote_wakeup_track_mode & RW_TRANSITIVE_SET &&
-			 is_normal_gtask(vcpu->remote_waker_gtask))
-			atomic64_set(&vcpu->local_waker_gtask,
-				atomic64_read(&vcpu->remote_waker_gtask));
 	}
 	trace_kvm_gthread_switch_arrive(vcpu, 
 			load_idx(guest_thread->load_epoch_id),
@@ -821,18 +885,19 @@ static void guest_thread_depart(struct kvm_vcpu *vcpu,
 		struct guest_thread_info *guest_thread, unsigned long long now)
 {
 	long long exec_time = 0;
-
+#ifdef CONFIG_KVM_VDI_DEBUG
+	kvm_get_guest_task(vcpu);
+#endif
 	if (likely(guest_thread->last_arrival)) {
 		exec_time = now - guest_thread->last_arrival;
 		account_cpu_load(vcpu, guest_thread, exec_time, now);
 	}
 	guest_thread->last_depart = now;
 
-	/* if lwaker == rwaker, this slice is for remote wakeup,
-	 * remote wakeup is valid for one slice, so reset */
-	if (unlikely(atomic64_read(&vcpu->local_waker_gtask) ==
-		     atomic64_read(&vcpu->remote_waker_gtask)))
+	/* if this slice is for remote wakeup, so reset */
+	if (vcpu->remote_waker_valid)
 		atomic64_set(&vcpu->remote_waker_gtask, 0);
+	vcpu->remote_waker_valid = 0;
 
 	trace_kvm_gthread_switch_depart(vcpu, 
 			load_idx(guest_thread->load_epoch_id),
@@ -986,7 +1051,7 @@ EXPORT_SYMBOL_GPL(destroy_task_aware_vcpu);
 
 /* by default: 500ms */
 #define DOUBLE_CLICK_DELAY      (500 * NSEC_PER_MSEC)
-void start_load_monitor(struct kvm *kvm, unsigned long long now)
+void start_load_monitor(struct kvm *kvm, unsigned long long now, int output)
 {
 	if (!load_monitor_enabled)
 		return;
@@ -1028,7 +1093,7 @@ void start_load_monitor(struct kvm *kvm, unsigned long long now)
 				vcpu->pre_monitor_run_delay = 0;
 		}
 		kvm->user_input_timestamp = kvm->monitor_timestamp = now;
-		check_pre_monitor_period(kvm, now, pre_monitor_duration);
+		check_pre_monitor_period(kvm, now, pre_monitor_duration, output);
 		mod_timer(&kvm->load_timer, jiffies + duration_jiffies);
 	}
 }
@@ -1038,15 +1103,18 @@ void request_partial_boost(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu)
 {
 	struct task_struct *task = NULL;
 	struct pid *pid;
+	struct guest_task_struct *src_gtask;
 
 	if (!sysctl_kvm_partial_boost ||
 	    vcpu->kvm->interactive_phase == NORMAL_PHASE)
 		return;
 
 	/* if source is NULL, unconditionally boosting */
+	if (src_vcpu)
+		src_gtask = get_gtask(&src_vcpu->local_waker_gtask);
 	if (src_vcpu && 
-	    (unlikely(!src_vcpu->cur_guest_task) ||
-	    (src_vcpu->cur_guest_task->flags & VF_BACKGROUND &&
+	    (unlikely(!src_gtask) || src_gtask != &interrupt_virtual_task ||
+	    (src_gtask->flags & VF_BACKGROUND &&
 	    !current->se.boost_flag)))	/* return if bg && boost off */
 		return;
 
@@ -1065,13 +1133,18 @@ void request_partial_boost(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu)
 #define KEYBOARD_LAPIC_VECTOR	0x31
 #define AC97_LAPIC_VECTOR	0x3b	/* 0xb (irq) | 0x30 */
 #define is_ac97_ioport(port)	(port >= 0xc800 && port <= 0xc8ff)
-void check_lapic_irq(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu,
-						u32 vector, u32 ipi)
+static inline struct kvm_vcpu *redirect_audio_interrupt(struct kvm_vcpu *vcpu)
+{
+	struct kvm_vcpu *audio_vcpu = vcpu->kvm->last_audio_vcpu;
+	return audio_vcpu ? audio_vcpu : vcpu;
+}
+struct kvm_vcpu *check_lapic_irq(struct kvm_vcpu *src_vcpu, 
+				struct kvm_vcpu *vcpu, u32 vector, u32 ipi)
 {
 	if (ipi && vector == RESCHEDULE_VECTOR) {
 		/* if dest vcpu is interrupt context (not normal task),
 		 * resched ipi doesn't inherit waker task */
-		if (is_normal_gtask(vcpu->local_waker_gtask)) {
+		if (is_normal_gtask(&vcpu->local_waker_gtask)) {
 			atomic64_set(&vcpu->remote_waker_gtask, 
 				atomic64_read(&src_vcpu->local_waker_gtask));
 
@@ -1080,14 +1153,19 @@ void check_lapic_irq(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu,
 		}
 		request_partial_boost(src_vcpu, vcpu);
 	}
-	else if (!ipi && /* non-IPI: local APIC */
-		 vector == KEYBOARD_LAPIC_VECTOR)
-			request_partial_boost(NULL, vcpu);
+	////else if (!ipi && /* non-IPI: local APIC */
+	////	 vector == KEYBOARD_LAPIC_VECTOR)
+	else if (!ipi && likely(!src_vcpu) &&	/* non-IPI: local APIC */
+		 (vector == AC97_LAPIC_VECTOR ||
+		  vector == KEYBOARD_LAPIC_VECTOR)) {
+		if (audio_intr_redirect && vector == AC97_LAPIC_VECTOR)
+			vcpu = redirect_audio_interrupt(vcpu); 
+		request_partial_boost(NULL, vcpu);
+	}
 
 	if (ipi) {
 #ifdef CONFIG_KVM_VDI_DEBUG
 		kvm_get_guest_task(src_vcpu);
-		smp_mb();
 #endif
 		trace_kvm_ipi(src_vcpu, vcpu, vector);
 #ifdef CONFIG_KVM_VDI_DEBUG
@@ -1098,6 +1176,7 @@ void check_lapic_irq(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu,
 		}
 #endif
 	}
+	return vcpu;
 }
 void check_injected_irq(struct kvm_vcpu *vcpu, int vector)
 {
@@ -1114,7 +1193,7 @@ void check_injected_irq(struct kvm_vcpu *vcpu, int vector)
 					sched_clock());
 		return;
 	}
-	if (remote_wakeup_track_mode & RW_INTERRUPT_RESET) {
+	if (remote_wakeup_track_mode & RWT_INTERRUPT_RESET) {
 		/* interrupts other than major IPIs */
 		atomic64_set(&vcpu->local_waker_gtask, 
 				(long long)&interrupt_virtual_task);
@@ -1138,33 +1217,32 @@ static inline int audio_interrupt_context(struct kvm_vcpu *vcpu)
  * is accounted */
 void check_audio_access(struct kvm_vcpu *vcpu)
 {
-	struct kvm *kvm = vcpu->kvm;
 	struct guest_task_struct *audio_task;
 	struct guest_task_struct *rwaker_task, *lwaker_task;
-	unsigned long long now;
 
+	/* synchronous audio access */
 	if (!is_ac97_ioport(vcpu->arch.pio.port) ||
 	    audio_interrupt_context(vcpu))
 		return;
 
 	trace_kvm_audio_access(vcpu, 0);
 
-	now = sched_clock();
+	vcpu->kvm->last_audio_vcpu = vcpu;
+
 	if (vcpu->kvm->interactive_phase == NORMAL_PHASE)
-		start_load_monitor(vcpu->kvm, now);
+		start_load_monitor(vcpu->kvm, sched_clock(), 1);
+
+	/* don't track remote wakeup */
+	if (!remote_wakeup_track_mode)
+		return;
 
 	/* update stat for waker task of audio-generating task */
 	audio_task = vcpu->cur_guest_task;
-	rwaker_task = (struct guest_task_struct *)
-				atomic64_read(&vcpu->remote_waker_gtask);
-	lwaker_task = (struct guest_task_struct *)
-				atomic64_read(&vcpu->local_waker_gtask);
+	rwaker_task = get_gtask(&vcpu->remote_waker_gtask);
+	lwaker_task = get_gtask(&vcpu->local_waker_gtask);
 
-	/* if remote and local wakers are not equal, this audio access
-	 * is performed during a slice where a resched ipi is received.
-	 * only consider an audio access of a vcpu woken after the ipi */
-	if (unlikely(!audio_task || !rwaker_task) ||
-	    lwaker_task != rwaker_task ||
+	if (!vcpu->remote_waker_valid ||
+	    unlikely(!audio_task || !rwaker_task) ||
 	    lwaker_task == &interrupt_virtual_task ||
 	    rwaker_task == &interrupt_virtual_task ||
 	    atomic64_read(&vcpu->remote_wake_timestamp) == 0)	/*not injected*/
@@ -1175,14 +1253,6 @@ void check_audio_access(struct kvm_vcpu *vcpu)
 	atomic_set(&audio_task->audio_count, AUDIO_GEN_FLAG);
 	atomic_inc(&rwaker_task->audio_count);
 	
-	/* simple policy: for each vm, one dominant remote waker is regarded as
-	 * a multimedia task to be excluded from background workloads */
-	if (!(atomic_read(&rwaker_task->audio_count) & AUDIO_GEN_FLAG) &&
-	    (kvm->dominant_audio_task == NULL ||
-	     atomic_read(&rwaker_task->audio_count) > 
-			atomic_read(&kvm->dominant_audio_task->audio_count)))
-		kvm->dominant_audio_task = rwaker_task;
-
 	trace_kvm_audio_access(vcpu, 1);
 }
 
@@ -1247,7 +1317,6 @@ int init_task_aware_agent(void)
 	if (!load_monitor_enabled)
 		return -1;
 
-	BUG_ON(guest_task_cache);
 	guest_task_cache = kmem_cache_create("guest_task_struct", 
 					sizeof(struct guest_task_struct), 
 					__alignof__(struct guest_task_struct),

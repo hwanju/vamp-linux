@@ -24,7 +24,7 @@ int kvm_ui_event(struct kvm *kvm, uint32_t arg)
 	if ((event_type == kvm_kbd_pressed && 
 	     likely_load_gen_keys(event_info)) || 
 	    event_type == kvm_mouse_released)
-		start_load_monitor(kvm, now);
+		start_load_monitor(kvm, now, 0);
 
 	trace_kvm_ui(kvm, event_type, event_info, load_idx_by_time(now));
 

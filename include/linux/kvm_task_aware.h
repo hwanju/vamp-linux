@@ -44,7 +44,6 @@ extern unsigned int load_period_shift;
 
 struct guest_thread_info {
 	volatile long state;	    /* 0 = not running, 2 = running */
-	int cpu;			/* physical cpu id hosting this vcpu */
 	unsigned long long last_depart; /* for garbage collection */ 
 	
 	/* 
@@ -60,25 +59,30 @@ struct guest_task_struct {
 	struct hlist_node link;
 	unsigned long id;	/* host-side id (i.e. cr3) */
 	int para_id;		/* guest-side id (i.e. tgid) by paravirt */
+	char name[TASK_COMM_LEN];	/* guest-side by paravirt */
 	/* aggregate guest thread load (in pct) 
 	 * during pre-monitoring period */
 	unsigned int pre_monitor_load;
 	unsigned int flags;
 	struct guest_thread_info threads[MAX_GUEST_TASK_VCPU];
+	atomic64_t last_arrival;	/* last arrival of its thread */
+#define MAX_BG_CONF	10
+	u8 bg_conf;
 	atomic_t audio_count;
+	unsigned int audio_avg;
 };
 
 void init_kvm_load_monitor(struct kvm *kvm);
 void exit_kvm_load_monitor(struct kvm *kvm);
-void start_load_monitor(struct kvm *kvm, unsigned long long now);
+void start_load_monitor(struct kvm *kvm, unsigned long long now, int output);
 void init_task_aware_vcpu(struct kvm_vcpu *vcpu);
 void destroy_task_aware_vcpu(struct kvm_vcpu *vcpu);
 int init_task_aware_agent(void);
 void destroy_task_aware_agent(void);
 void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id);
 void check_on_hlt(struct kvm_vcpu *vcpu);
-void check_lapic_irq(struct kvm_vcpu *src_vcpu, struct kvm_vcpu *vcpu,
-						u32 vector, u32 ipi);
+struct kvm_vcpu *check_lapic_irq(struct kvm_vcpu *src_vcpu, 
+				struct kvm_vcpu *vcpu, u32 vector, u32 ipi);
 void check_injected_irq(struct kvm_vcpu *vcpu, int vector);
 void check_audio_access(struct kvm_vcpu *vcpu);
 #endif

@@ -3208,9 +3208,11 @@ context_switch(struct rq *rq, struct task_struct *prev,
 		next->active_mm = oldmm;
 		atomic_inc(&oldmm->mm_count);
 		enter_lazy_tlb(oldmm, next);
-#ifdef CONFIG_KVM_VDI	/* guest-side */
+#ifdef CONFIG_KVM_VDI_DEBUG	/* guest-side */
+#if 0
 		/* to track kernel thread: only name for debugging */
 		kvm_para_set_taskname(next->comm);
+#endif
 #endif
 	} else
 		switch_mm(oldmm, mm, next);
