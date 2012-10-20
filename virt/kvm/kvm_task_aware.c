@@ -80,8 +80,9 @@ static void update_audio_count(struct kvm *kvm, struct guest_task_struct *gtask)
 
 	/* simple policy: for each vm, one dominant remote waker is regarded as
 	 * a multimedia task to be excluded from background workloads */
-	if (kvm->dominant_audio_task == NULL ||
-	    gtask->audio_avg > kvm->dominant_audio_task->audio_avg)
+	if (audio_count &&	/* only consider case where audio count > 0 */
+	    (kvm->dominant_audio_task == NULL ||
+	     gtask->audio_avg > kvm->dominant_audio_task->audio_avg))
 		kvm->dominant_audio_task = gtask;
 }
 static inline void reset_audio_count(struct guest_task_struct *gtask)
@@ -562,6 +563,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 	/* if output-driven check, pre-iterate to update avg audio count */
 	if (output) {
 		/* init first, will be updated in update_audio_count */
+		struct guest_task_struct *prev_atask = kvm->dominant_audio_task;
 		kvm->dominant_audio_task = NULL;
 		for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
 			hlist_for_each_entry(iter_gtask, node, 
@@ -570,6 +572,8 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 				    pre_monitor_timestamp))
 					update_audio_count(kvm, iter_gtask);
 		}
+		if (unlikely(!kvm->dominant_audio_task)) 
+			kvm->dominant_audio_task = prev_atask;
 	}
 	sti->nr_tasks = 0;
 	for (bidx = 0; bidx < GUEST_TASK_HASH_HEADS; bidx++) {
