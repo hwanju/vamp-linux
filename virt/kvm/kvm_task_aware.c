@@ -22,9 +22,12 @@ int kvm_set_guest_task(struct kvm_vcpu *vcpu);
 #define set_vcpu_state(vcpu, state_value)     \
 	set_mb(vcpu->state, (state_value))
 
+#if 0
 #define get_bg_vcpu_nice(vcpu)  \
 	(sysctl_kvm_vamp <= 19 ? sysctl_kvm_vamp: \
 	 (vcpu->bg_exec_time + 1) * (sysctl_kvm_vamp - 19) / (vcpu->exec_time + 1))
+#endif
+#define get_non_bg_nice(vcpu)	(-1 * sysctl_kvm_vamp)
 
 #define KVM_TA_DEBUG
 
@@ -495,13 +498,18 @@ module_param(remote_wakeup_latency_ns, uint, 0644);
 static void update_vcpu_shares(struct kvm_vcpu *vcpu, 
 					struct task_struct *task)
 {
-	int bg_nice = get_bg_vcpu_nice(vcpu);
+	int non_bg_nice = 0;
 
 	if (unlikely(!vcpu->cur_guest_task))
 		return;
-	if (vcpu->cur_guest_task->flags & VF_BACKGROUND)
-		trace_kvm_bg_vcpu(vcpu, bg_nice);
-	adjust_vcpu_shares(task, vcpu->cur_guest_task->flags, bg_nice);
+
+	if (vcpu->kvm->interactive_phase == MIXED_INTERACTIVE_PHASE)
+		non_bg_nice = get_non_bg_nice(vcpu);
+
+	if (!(vcpu->cur_guest_task->flags & VF_BACKGROUND))
+		trace_kvm_non_bg_vcpu(vcpu, non_bg_nice);
+
+	adjust_vcpu_shares(task, vcpu->cur_guest_task->flags, non_bg_nice);
 }
 
 /* 
