@@ -53,12 +53,12 @@ module_param(load_monitor_enabled, bool, S_IRUGO | S_IWUSR);
 	(atomic64_read(&gtask->last_arrival) >= timestamp)
 
 #define RWT_BASE		0x1
-#define RWT_INTERRUPT_RESET	0x2
-#define RWT_TRANSITIVE_SET	0x4
+#define RWT_TRANSITIVE_SET	0x2
+#define RWT_INTERRUPT_RESET	0x4
 #define RWT_WEIGHTED_AUDIO_CNT	0x8
 static unsigned int remote_wakeup_track_mode = 
-		RWT_BASE | RWT_INTERRUPT_RESET | 
-		RWT_TRANSITIVE_SET | RWT_WEIGHTED_AUDIO_CNT;
+		RWT_BASE | RWT_TRANSITIVE_SET | 
+		RWT_INTERRUPT_RESET | RWT_WEIGHTED_AUDIO_CNT;
 module_param(remote_wakeup_track_mode, uint, 0644);
 
 static int __read_mostly audio_intr_redirect = 1;
@@ -90,6 +90,8 @@ static void update_audio_count(struct kvm *kvm, struct guest_task_struct *gtask)
 }
 static inline void reset_audio_count(struct guest_task_struct *gtask)
 {
+	if (atomic_read(&gtask->audio_count) & AUDIO_GEN_FLAG)
+		return;
 	atomic_set(&gtask->audio_count, 0);
 }
 static inline int is_audio_task(struct kvm *kvm, 
