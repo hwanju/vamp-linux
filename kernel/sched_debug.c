@@ -466,6 +466,7 @@ void proc_sched_show_task(struct task_struct *p, struct seq_file *m)
 	PN(se.statistics.remote_wake_sum);
 	P(se.statistics.remote_wake_count);
 	P(se.statistics.nr_vcpu_task_switch);
+	P(se.statistics.nr_vcpu_fg_switch);
 	P(se.statistics.nr_vcpu_bg2fg_switch);
 #endif
 

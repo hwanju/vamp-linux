@@ -1172,6 +1172,7 @@ struct sched_statistics {
 	u64			remote_wake_sum;
 	/* host */
 	u64			nr_vcpu_task_switch;
+	u64			nr_vcpu_fg_switch;
 	u64			nr_vcpu_bg2fg_switch;
 #endif
 };

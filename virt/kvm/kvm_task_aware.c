@@ -540,7 +540,7 @@ static void check_pre_monitor_period(struct kvm *kvm, unsigned long long now,
 	struct kvm_slow_task_info *sti = &kvm->arch.sti.stask_info;
 
 	trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, 
-			load_period_msec, pre_monitor_timestamp, now);
+			load_period_msec, pre_monitor_timestamp, now, output);
 
 	/* scan vcpu loads for pre-monitoring period */
 	kvm->pre_monitor_load = 0;
@@ -693,7 +693,7 @@ static void clear_gtask_flags(struct kvm *kvm)
 
 static void finish_interactive_period(struct kvm *kvm)
 {
-	trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0);
+	trace_kvm_load_check_exit(kvm->vm_id, 0, 0, 0, 0, 0);
 	kvm->interactive_phase = NORMAL_PHASE;
 	clear_gtask_flags(kvm);
 
@@ -730,7 +730,7 @@ static void load_timer_handler(unsigned long data)
 		goto finish_interactive_phase;
 
 	trace_kvm_load_check_entry(kvm->vm_id, NR_LOAD_ENTRIES, 
-			load_period_msec, kvm->monitor_timestamp, now);
+			load_period_msec, kvm->monitor_timestamp, now, 0);
 
 	/* scan vcpu loads for monitoring period */
 	eff_vm_load = 0;
@@ -953,11 +953,17 @@ void track_guest_task(struct kvm_vcpu *vcpu, unsigned long guest_task_id)
 		prev = &vcpu->cur_guest_task->threads[vcpu->vcpu_id];
 		guest_thread_depart(vcpu, prev, now);
 
-		/* check if bg->fg scheduling */
-		if (vcpu->cur_guest_task->flags & VF_BACKGROUND &&
-		    !(guest_task->flags & VF_BACKGROUND))
-			current->se.statistics.nr_vcpu_bg2fg_switch++;
-		current->se.statistics.nr_vcpu_task_switch++;
+		/* check if bg->fg scheduling only during mixed phase */
+		if (vcpu->kvm->interactive_phase == MIXED_INTERACTIVE_PHASE) {
+			if (!(guest_task->flags & VF_BACKGROUND)) {
+				if (vcpu->cur_guest_task->flags & VF_BACKGROUND) {
+					current->se.statistics.nr_vcpu_bg2fg_switch++;
+					trace_kvm_bg2fg(vcpu, guest_task);
+				}
+				current->se.statistics.nr_vcpu_fg_switch++;
+			}
+			current->se.statistics.nr_vcpu_task_switch++;
+		}
 	}
 	/* caching next guest thread as the current one */
 	vcpu->cur_guest_task = guest_task;

@@ -390,8 +390,8 @@ TRACE_EVENT(kvm_ui,
 );
 
 TRACE_EVENT(kvm_load_check,
-	TP_PROTO(int op, int vm_id, int nr_load_entries, unsigned int load_period_msec, u64 start_load_time, u64 end_load_time),
-	TP_ARGS(op, vm_id, nr_load_entries, load_period_msec, start_load_time, end_load_time),
+	TP_PROTO(int op, int vm_id, int nr_load_entries, unsigned int load_period_msec, u64 start_load_time, u64 end_load_time, int output),
+	TP_ARGS(op, vm_id, nr_load_entries, load_period_msec, start_load_time, end_load_time, output),
 
 	TP_STRUCT__entry(
 		__field(	int,            op              )
@@ -400,6 +400,7 @@ TRACE_EVENT(kvm_load_check,
 		__field(	unsigned int,   load_period_msec)
 		__field(	u64,            start_load_time )
 		__field(	u64,            end_load_time   )
+		__field(	int,            output		)
 	),
 
 	TP_fast_assign(
@@ -409,15 +410,17 @@ TRACE_EVENT(kvm_load_check,
                 __entry->load_period_msec = load_period_msec;
                 __entry->start_load_time= start_load_time;
                 __entry->end_load_time  = end_load_time;
+                __entry->output = output;
 	),
 
-	TP_printk("%s vm%d nr_load_entries=%d load_period_msec=%u start=%llu end=%llu", __entry->op ? "entry" : "exit",
-                        __entry->vm_id, __entry->nr_load_entries, __entry->load_period_msec, __entry->start_load_time, __entry->end_load_time)
+	TP_printk("%s vm%d nr_load_entries=%d load_period_msec=%u start=%llu end=%llu output=%d", __entry->op ? "entry" : "exit",
+                        __entry->vm_id, __entry->nr_load_entries, __entry->load_period_msec, 
+			__entry->start_load_time, __entry->end_load_time, __entry->output)
 );
-#define trace_kvm_load_check_entry(vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)     \
-        trace_kvm_load_check(1, vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)
-#define trace_kvm_load_check_exit(vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)     \
-        trace_kvm_load_check(0, vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time)
+#define trace_kvm_load_check_entry(vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time, output)     \
+        trace_kvm_load_check(1, vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time, output)
+#define trace_kvm_load_check_exit(vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time, output)     \
+        trace_kvm_load_check(0, vm_id, load_period_msec, nr_load_entries, start_load_time, end_load_time, output)
 
 TRACE_EVENT(kvm_vcpu_stat,
 	TP_PROTO(int vm_id, struct kvm_vcpu *vcpu, u64 run_delay),
@@ -615,6 +618,23 @@ TRACE_EVENT(kvm_audio_access,
 	),              
 
 	TP_printk("vcpu_id=%d port=%x\n", __entry->vcpu_id, __entry->port)
+);
+
+TRACE_EVENT(kvm_bg2fg,
+	TP_PROTO(struct kvm_vcpu *vcpu, struct guest_task_struct *gtask),
+	TP_ARGS(vcpu, gtask),
+
+	TP_STRUCT__entry(
+		__field(	int,            vcpu_id			)
+		__field(	unsigned long,  gtask_id		)
+	),
+
+	TP_fast_assign(
+                __entry->vcpu_id		= vcpu->vcpu_id;
+                __entry->gtask_id		= gtask->id;
+	),
+
+	TP_printk("vcpu_id=%d gtask_id=%05lx", __entry->vcpu_id, __entry->gtask_id) 
 );
 #endif /* CONFIG_KVM_VDI */
 #endif /* _TRACE_KVM_MAIN_H */
