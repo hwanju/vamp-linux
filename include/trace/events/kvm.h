@@ -543,25 +543,25 @@ TRACE_EVENT(kvm_gtask_stat,
                 __entry->interactive_phase, __entry->guest_task_id, __entry->cpu_load, __entry->flags)
 );
 
-TRACE_EVENT(kvm_non_bg_vcpu,
-	TP_PROTO(struct kvm_vcpu *vcpu, int non_bg_nice),
-	TP_ARGS(vcpu, non_bg_nice),
+TRACE_EVENT(kvm_bg_vcpu,
+	TP_PROTO(struct kvm_vcpu *vcpu, int bg_nice),
+	TP_ARGS(vcpu, bg_nice),
 
 	TP_STRUCT__entry(
 		__field(	int,		vcpu_id         )
 		__field(	u64,	        bg_exec_time    )
 		__field(	u64,	        exec_time       )
-		__field(	int,		non_bg_nice	)
+		__field(	int,		bg_nice		)
 	),
 
 	TP_fast_assign(
 		__entry->vcpu_id        = vcpu->vcpu_id;
 		__entry->bg_exec_time   = vcpu->bg_exec_time;
 		__entry->exec_time      = vcpu->exec_time;
-		__entry->non_bg_nice   = non_bg_nice;
+		__entry->bg_nice	= bg_nice;
 	),
-	TP_printk("v%d bg_exec_time=%llu exec_time=%llu non_bg_nice=%d", __entry->vcpu_id, 
-                __entry->bg_exec_time, __entry->exec_time, __entry->non_bg_nice)
+	TP_printk("v%d bg_exec_time=%llu exec_time=%llu bg_nice=%d", __entry->vcpu_id, 
+                __entry->bg_exec_time, __entry->exec_time, __entry->bg_nice)
 );
 
 TRACE_EVENT(kvm_system_task,

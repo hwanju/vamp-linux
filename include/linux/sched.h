@@ -2739,7 +2739,7 @@ extern void set_interactive_phase(struct sched_entity *se, int interactive_phase
 #define VF_NO_LWAKER_UPDATE	0x80000000			/* skip local waker update at task arrival */
 
 extern void adjust_vcpu_shares(struct task_struct *p, 
-		unsigned int new_flags, int non_bg_nice);
+		unsigned int new_flags, int bg_nice);
 extern int get_interactive_count(int cpu);
 extern int request_boost(struct task_struct *p);
 extern void yield_from_boost(struct task_struct *p);
