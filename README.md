@@ -65,5 +65,5 @@ Note that the vAMP hypervisor extention is a research prototype, so the source c
 # git diff 02f8c6aee8df3cd..c957ef8f9ddf23
 ```
 
-To readily look at how it works, several tracepoints are placed in major code paths. Refer to `/sys/kernel/debug/tracing/events/kvm/` if you properly mount debugfs. Disabling by setting zero to /proc/sys/kernel/kvm_vamp, you can also simply track guest OS tasks by using tracepoints (e.g., kvm_gthread_switch) without being affected by vAMP. This tracking further may enables other people to devise other useful techniques leveraging task-awareness in the hypervisor. 
+To readily look at how it works, several tracepoints are placed in major code paths. Refer to `/sys/kernel/debug/tracing/events/kvm/` if you properly mount debugfs. Disabling vAMP by setting zero to /proc/sys/kernel/kvm_vamp, you can also simply track guest OS tasks by using tracepoints (e.g., kvm_gthread_switch) without being affected by vAMP. This tracking further may enables other people to devise other useful techniques leveraging task-awareness in the hypervisor. 
 
